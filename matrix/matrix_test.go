@@ -90,3 +90,12 @@ var testMatrices = []Matrix{
 	Rotate(math.Pi / 2),
 	Rotate(math.Pi),
 }
+
+func BenchmarkApply(b *testing.B) {
+	M := Rotate(1)
+	x := 2.0
+	y := 3.0
+	for range b.N {
+		x, y = M.Apply(x, y)
+	}
+}
