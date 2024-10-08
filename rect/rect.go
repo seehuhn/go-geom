@@ -36,6 +36,10 @@ func (r Rect) Dy() float64 {
 	return r.URy - r.LLy
 }
 
+func (r Rect) Covers(other Rect) bool {
+	return r.LLx <= other.LLx && r.LLy <= other.LLy && r.URx >= other.URx && r.URy >= other.URy
+}
+
 func (r *Rect) Extend(other Rect) {
 	if other.IsZero() {
 		return
@@ -56,4 +60,11 @@ func (r *Rect) Extend(other Rect) {
 	if other.URy > r.URy {
 		r.URy = other.URy
 	}
+}
+
+func (r *Rect) Scale(factor float64) {
+	r.LLx *= factor
+	r.LLy *= factor
+	r.URx *= factor
+	r.URy *= factor
 }
