@@ -99,3 +99,9 @@ func Rotate(phi float64) Matrix {
 	s := math.Sin(phi)
 	return Matrix{c, s, -s, c, 0, 0}
 }
+
+// RotateDeg rotates the coordinate system by the given angle (in degrees).
+func RotateDeg(phi float64) Matrix {
+	phi *= math.Pi / 180
+	return Rotate(phi)
+}
