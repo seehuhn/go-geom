@@ -16,6 +16,8 @@
 
 package rect
 
+import "math"
+
 // Rect represents an axis-aligned rectangle.
 type Rect struct {
 	LLx, LLy, URx, URy float64
@@ -67,4 +69,12 @@ func (r *Rect) Scale(factor float64) {
 	r.LLy *= factor
 	r.URx *= factor
 	r.URy *= factor
+}
+
+func (r Rect) Rounded() Rect {
+	r.LLx = math.Floor(r.LLx)
+	r.LLy = math.Floor(r.LLy)
+	r.URx = math.Ceil(r.URx)
+	r.URy = math.Ceil(r.URy)
+	return r
 }
