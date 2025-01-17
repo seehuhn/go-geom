@@ -40,10 +40,11 @@ func (M Matrix) Apply(x, y float64) (float64, float64) {
 
 // Mul multiplies two transformation matrices and returns the result.
 // The result is equivalent to first applying M and then B.
+// Mathematically: v * (M * B) = (v * M) * B.
 func (M Matrix) Mul(B Matrix) Matrix {
-	// / A0 A1 0 \  / B0 B1 0 \   / A0*B0+A1*B2    A0*B1+A1*B3    0 \
-	// | A2 A3 0 |  | B2 B3 0 | = | A2*B0+A3*B2    A2*B1+A3*B3    0 |
-	// \ A4 A5 1 /  \ B4 B5 1 /   \ A4*B0+A5*B2+B4 A4*B1+A5*B3+B5 1 /
+	// / M0 M1 0 \  / B0 B1 0 \   / M0*B0+M1*B2    M0*B1+M1*B3    0 \
+	// | M2 M3 0 |  | B2 B3 0 | = | M2*B0+M3*B2    M2*B1+M3*B3    0 |
+	// \ M4 M5 1 /  \ B4 B5 1 /   \ M4*B0+M5*B2+B4 M4*B1+M5*B3+B5 1 /
 	return Matrix{
 		M[0]*B[0] + M[1]*B[2],
 		M[0]*B[1] + M[1]*B[3],
