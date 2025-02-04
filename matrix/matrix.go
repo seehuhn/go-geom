@@ -33,6 +33,10 @@ import "math"
 //	(x y 1) * M = (a*x+c*y+e, b*x+d*y+f, 1)
 type Matrix [6]float64
 
+func (M Matrix) IsZero() bool {
+	return M == Zero
+}
+
 // Apply applies the transformation matrix to the given vector.
 func (M Matrix) Apply(x, y float64) (float64, float64) {
 	return x*M[0] + y*M[2] + M[4], x*M[1] + y*M[3] + M[5]
