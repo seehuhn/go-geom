@@ -16,7 +16,11 @@
 
 package path
 
-import "iter"
+import (
+	"iter"
+
+	"seehuhn.de/go/geom/rect"
+)
 
 type Point struct {
 	X, Y float64
@@ -98,4 +102,58 @@ func (p Path) ToCubic() Path {
 			}
 		}
 	}
+}
+
+// BBox computes the bounding box for a path.
+// For curves, it uses the heuristic that the bounding box must include all control points.
+// This provides a conservative approximation that always contains the true bounding box.
+func (p Path) BBox() rect.Rect {
+	var bbox rect.Rect
+	first := true
+
+	for cmd, pts := range p {
+		switch cmd {
+		case CmdMoveTo, CmdLineTo:
+			if len(pts) >= 1 {
+				x, y := pts[0].X, pts[0].Y
+				if first {
+					bbox.LLx, bbox.LLy = x, y
+					bbox.URx, bbox.URy = x, y
+					first = false
+				} else {
+					bbox.Add(x, y)
+				}
+			}
+		case CmdQuadTo:
+			if len(pts) >= 2 {
+				// include control point and endpoint
+				for _, pt := range pts {
+					x, y := pt.X, pt.Y
+					if first {
+						bbox.LLx, bbox.LLy = x, y
+						bbox.URx, bbox.URy = x, y
+						first = false
+					} else {
+						bbox.Add(x, y)
+					}
+				}
+			}
+		case CmdCubeTo:
+			if len(pts) >= 3 {
+				// include all control points and endpoint
+				for _, pt := range pts {
+					x, y := pt.X, pt.Y
+					if first {
+						bbox.LLx, bbox.LLy = x, y
+						bbox.URx, bbox.URy = x, y
+						first = false
+					} else {
+						bbox.Add(x, y)
+					}
+				}
+			}
+		}
+	}
+
+	return bbox
 }

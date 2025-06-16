@@ -42,6 +42,22 @@ func (r Rect) Covers(other Rect) bool {
 	return r.LLx <= other.LLx && r.LLy <= other.LLy && r.URx >= other.URx && r.URy >= other.URy
 }
 
+// Add enlarges the rectangle if necessary to include the point (x, y).
+func (r *Rect) Add(x, y float64) {
+	if x < r.LLx {
+		r.LLx = x
+	}
+	if y < r.LLy {
+		r.LLy = y
+	}
+	if x > r.URx {
+		r.URx = x
+	}
+	if y > r.URy {
+		r.URy = y
+	}
+}
+
 func (r *Rect) Extend(other Rect) {
 	if other.IsZero() {
 		return
