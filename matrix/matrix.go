@@ -24,13 +24,13 @@ import "math"
 // A matrix object M = [a b c d e f] corresponds to the following
 // 3x3 matrix:
 //
-//	/ a b 0 \
-//	| c d 0 |
-//	\ e f 1 /
+//	/ a c e \
+//	| b d f |
+//	\ 0 0 1 /
 //
 // A vector (x, y, 1) is transformed by M into
 //
-//	(x y 1) * M = (a*x+c*y+e, b*x+d*y+f, 1)
+//	M * (x, y, 1) = (a*x+c*y+e, b*x+d*y+f, 1)
 type Matrix [6]float64
 
 func (M Matrix) IsZero() bool {
@@ -44,11 +44,8 @@ func (M Matrix) Apply(x, y float64) (float64, float64) {
 
 // Mul multiplies two transformation matrices and returns the result.
 // The result is equivalent to first applying M and then B.
-// Mathematically: v * (M * B) = (v * M) * B.
+// Mathematically: (B * M) * v = B * (M * v).
 func (M Matrix) Mul(B Matrix) Matrix {
-	// / M0 M1 0 \  / B0 B1 0 \   / M0*B0+M1*B2    M0*B1+M1*B3    0 \
-	// | M2 M3 0 |  | B2 B3 0 | = | M2*B0+M3*B2    M2*B1+M3*B3    0 |
-	// \ M4 M5 1 /  \ B4 B5 1 /   \ M4*B0+M5*B2+B4 M4*B1+M5*B3+B5 1 /
 	return Matrix{
 		M[0]*B[0] + M[1]*B[2],
 		M[0]*B[1] + M[1]*B[3],

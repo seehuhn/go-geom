@@ -45,12 +45,7 @@ const (
 //   - CmdClose: 0 points (straight line from the current point to start of the current sub-path)
 type Path iter.Seq2[Command, []Point]
 
-// Transform applies a 2D affine transformation to a path.
-// The transformation matrix M = [a, b, c, d, e, f] represents:
-//
-//	[x'] = [a c e]   [x]
-//	[y'] = [b d f] * [y]
-//	[1'] = [0 0 1]   [1]
+// Transform applies the matrix M to the path.
 func (p Path) Transform(M [6]float64) Path {
 	return func(yield func(Command, []Point) bool) {
 		var buf [3]Point
@@ -69,8 +64,8 @@ func (p Path) Transform(M [6]float64) Path {
 }
 
 // ToCubic converts all quadratic segments in the path to cubic segments.
-// The resulting representation describes exactly the same path,
-// but is less efficient (since two control points are used instead of one).
+// The resulting representation describes exactly the same path, but is less
+// efficient (since two control points are used instead of one for each curve).
 func (p Path) ToCubic() Path {
 	// https://pomax.github.io/bezierinfo/#reordering
 	return func(yield func(Command, []Point) bool) {
