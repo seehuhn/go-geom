@@ -56,6 +56,30 @@ func (M Matrix) Mul(B Matrix) Matrix {
 	}
 }
 
+// Translate applies a translation after the transformation matrix M.
+func (M Matrix) Translate(dx, dy float64) Matrix {
+	B := Translate(dx, dy)
+	return M.Mul(B)
+}
+
+// Scale applies a scaling after the transformation matrix M.
+func (M Matrix) Scale(xScale, yScale float64) Matrix {
+	B := Scale(xScale, yScale)
+	return M.Mul(B)
+}
+
+// Rotate applies a rotation after the transformation matrix M.
+func (M Matrix) Rotate(phi float64) Matrix {
+	B := Rotate(phi)
+	return M.Mul(B)
+}
+
+// RotateDeg applies a rotation (in degrees) after the transformation matrix M.
+func (M Matrix) RotateDeg(phi float64) Matrix {
+	B := RotateDeg(phi)
+	return M.Mul(B)
+}
+
 // Inv computes the inverse of the transformation matrix M.
 func (M Matrix) Inv() Matrix {
 	det := M[0]*M[3] - M[1]*M[2]
