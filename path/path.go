@@ -20,11 +20,8 @@ import (
 	"iter"
 
 	"seehuhn.de/go/geom/rect"
+	"seehuhn.de/go/geom/vec"
 )
-
-type Point struct {
-	X, Y float64
-}
 
 type Command byte
 
@@ -43,15 +40,15 @@ const (
 //   - CmdQuadTo: 2 points (control point and endpoint of the quadratic Bezier curve)
 //   - CmdCubeTo: 3 points (control point 1, control point 2, and endpoint of the cubic Bezier curve)
 //   - CmdClose: 0 points (straight line from the current point to start of the current sub-path)
-type Path iter.Seq2[Command, []Point]
+type Path iter.Seq2[Command, []vec.Vec2]
 
 // Transform applies the matrix M to the path.
 func (p Path) Transform(M [6]float64) Path {
-	return func(yield func(Command, []Point) bool) {
-		var buf [3]Point
+	return func(yield func(Command, []vec.Vec2) bool) {
+		var buf [3]vec.Vec2
 		for cmd, pts := range p {
 			for i, p := range pts {
-				buf[i] = Point{
+				buf[i] = vec.Vec2{
 					X: p.X*M[0] + p.Y*M[2] + M[4],
 					Y: p.X*M[1] + p.Y*M[3] + M[5],
 				}
@@ -68,10 +65,10 @@ func (p Path) Transform(M [6]float64) Path {
 // efficient (since two control points are used instead of one for each curve).
 func (p Path) ToCubic() Path {
 	// https://pomax.github.io/bezierinfo/#reordering
-	return func(yield func(Command, []Point) bool) {
-		var current Point
-		var start Point
-		var buf [3]Point
+	return func(yield func(Command, []vec.Vec2) bool) {
+		var current vec.Vec2
+		var start vec.Vec2
+		var buf [3]vec.Vec2
 		for cmd, pts := range p {
 			if cmd == CmdQuadTo {
 				buf[0].X = current.X*1/3 + pts[0].X*2/3

@@ -20,25 +20,26 @@ import (
 	"testing"
 
 	"seehuhn.de/go/geom/rect"
+	"seehuhn.de/go/geom/vec"
 )
 
 func TestBBox(t *testing.T) {
 	// Create a simple rectangular path
-	path := func(yield func(Command, []Point) bool) {
+	path := func(yield func(Command, []vec.Vec2) bool) {
 		// Move to origin
-		if !yield(CmdMoveTo, []Point{{0, 0}}) {
+		if !yield(CmdMoveTo, []vec.Vec2{{X: 0, Y: 0}}) {
 			return
 		}
 		// Line to (10, 0)
-		if !yield(CmdLineTo, []Point{{10, 0}}) {
+		if !yield(CmdLineTo, []vec.Vec2{{X: 10, Y: 0}}) {
 			return
 		}
 		// Line to (10, 5)
-		if !yield(CmdLineTo, []Point{{10, 5}}) {
+		if !yield(CmdLineTo, []vec.Vec2{{X: 10, Y: 5}}) {
 			return
 		}
 		// Line to (0, 5)
-		if !yield(CmdLineTo, []Point{{0, 5}}) {
+		if !yield(CmdLineTo, []vec.Vec2{{X: 0, Y: 5}}) {
 			return
 		}
 		// Close path
@@ -57,13 +58,13 @@ func TestBBox(t *testing.T) {
 
 func TestBBoxWithCurves(t *testing.T) {
 	// Create a path with a cubic curve
-	path := func(yield func(Command, []Point) bool) {
+	path := func(yield func(Command, []vec.Vec2) bool) {
 		// Move to origin
-		if !yield(CmdMoveTo, []Point{{0, 0}}) {
+		if !yield(CmdMoveTo, []vec.Vec2{{X: 0, Y: 0}}) {
 			return
 		}
 		// Cubic curve with control points at (5, 10) and (15, 10), ending at (20, 0)
-		if !yield(CmdCubeTo, []Point{{5, 10}, {15, 10}, {20, 0}}) {
+		if !yield(CmdCubeTo, []vec.Vec2{{X: 5, Y: 10}, {X: 15, Y: 10}, {X: 20, Y: 0}}) {
 			return
 		}
 	}
@@ -79,7 +80,7 @@ func TestBBoxWithCurves(t *testing.T) {
 
 func TestBBoxEmpty(t *testing.T) {
 	// Empty path
-	path := func(yield func(Command, []Point) bool) {}
+	path := func(yield func(Command, []vec.Vec2) bool) {}
 
 	bbox := Path(path).BBox()
 
