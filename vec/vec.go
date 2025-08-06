@@ -49,8 +49,7 @@ func (v Vec2) Dot(other Vec2) float64 {
 	return v.X*other.X + v.Y*other.Y
 }
 
-// Normal returns a unit vector that is perpendicular to the vector v.
-// The returned vector is rotated 90 degrees counter-clockwise.
+// Normal returns a unit vector perpendicular to v, rotated 90 degrees counter-clockwise.
 func (v Vec2) Normal() Vec2 {
 	length := v.Length()
 	if length < 1e-9 {

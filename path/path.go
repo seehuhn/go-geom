@@ -42,7 +42,7 @@ const (
 //   - CmdClose: 0 points (straight line from the current point to start of the current sub-path)
 type Path iter.Seq2[Command, []vec.Vec2]
 
-// Transform applies the matrix M to the path.
+// Transform applies matrix M to the path.
 func (p Path) Transform(M [6]float64) Path {
 	return func(yield func(Command, []vec.Vec2) bool) {
 		var buf [3]vec.Vec2
@@ -60,11 +60,9 @@ func (p Path) Transform(M [6]float64) Path {
 	}
 }
 
-// ToCubic converts all quadratic segments in the path to cubic segments.
-// The resulting representation describes exactly the same path, but is less
-// efficient (since two control points are used instead of one for each curve).
+// ToCubic converts all quadratic segments to cubic segments.
+// The resulting representation describes the same path but uses more control points.
 func (p Path) ToCubic() Path {
-	// https://pomax.github.io/bezierinfo/#reordering
 	return func(yield func(Command, []vec.Vec2) bool) {
 		var current vec.Vec2
 		var start vec.Vec2
@@ -97,8 +95,7 @@ func (p Path) ToCubic() Path {
 }
 
 // BBox computes the bounding box for a path.
-// For curves, it uses the heuristic that the bounding box must include all control points.
-// This provides a conservative approximation that always contains the true bounding box.
+// For curves, it includes all control points, providing a conservative approximation.
 func (p Path) BBox() rect.Rect {
 	var bbox rect.Rect
 	first := true
@@ -118,8 +115,7 @@ func (p Path) BBox() rect.Rect {
 			}
 		case CmdQuadTo:
 			if len(pts) >= 2 {
-				// include control point and endpoint
-				for _, pt := range pts {
+					for _, pt := range pts {
 					x, y := pt.X, pt.Y
 					if first {
 						bbox.LLx, bbox.LLy = x, y
@@ -132,8 +128,7 @@ func (p Path) BBox() rect.Rect {
 			}
 		case CmdCubeTo:
 			if len(pts) >= 3 {
-				// include all control points and endpoint
-				for _, pt := range pts {
+					for _, pt := range pts {
 					x, y := pt.X, pt.Y
 					if first {
 						bbox.LLx, bbox.LLy = x, y
