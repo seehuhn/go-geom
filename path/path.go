@@ -115,7 +115,7 @@ func (p Path) BBox() rect.Rect {
 			}
 		case CmdQuadTo:
 			if len(pts) >= 2 {
-					for _, pt := range pts {
+				for _, pt := range pts {
 					x, y := pt.X, pt.Y
 					if first {
 						bbox.LLx, bbox.LLy = x, y
@@ -128,7 +128,7 @@ func (p Path) BBox() rect.Rect {
 			}
 		case CmdCubeTo:
 			if len(pts) >= 3 {
-					for _, pt := range pts {
+				for _, pt := range pts {
 					x, y := pt.X, pt.Y
 					if first {
 						bbox.LLx, bbox.LLy = x, y

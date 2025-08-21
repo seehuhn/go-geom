@@ -102,7 +102,7 @@ func TestTransform(t *testing.T) {
 	}{
 		{
 			name:      "identity transform",
-			transform: [6]float64{1, 0, 0, 1, 0, 0}, 
+			transform: [6]float64{1, 0, 0, 1, 0, 0},
 			expected: []struct {
 				cmd Command
 				pts []vec.Vec2
@@ -114,7 +114,7 @@ func TestTransform(t *testing.T) {
 		},
 		{
 			name:      "translate by (2,3)",
-			transform: [6]float64{1, 0, 0, 1, 2, 3}, 
+			transform: [6]float64{1, 0, 0, 1, 2, 3},
 			expected: []struct {
 				cmd Command
 				pts []vec.Vec2
@@ -126,7 +126,7 @@ func TestTransform(t *testing.T) {
 		},
 		{
 			name:      "scale by 2",
-			transform: [6]float64{2, 0, 0, 2, 0, 0}, 
+			transform: [6]float64{2, 0, 0, 2, 0, 0},
 			expected: []struct {
 				cmd Command
 				pts []vec.Vec2
@@ -308,7 +308,7 @@ func TestToCubic(t *testing.T) {
 			t.Errorf("expected Close, got %v", results[2].cmd)
 		}
 
-		if results[2].pts != nil && len(results[2].pts) != 0 {
+		if len(results[2].pts) != 0 {
 			t.Errorf("expected no points for Close, got %v", results[2].pts)
 		}
 	})
