@@ -94,3 +94,19 @@ func (r Rect) Rounded() Rect {
 	r.URy = math.Ceil(r.URy)
 	return r
 }
+
+// IntRect represents an axis-aligned rectangle with integer coordinates.
+// This is used for pixel-based operations such as image dimensions.
+type IntRect struct {
+	XMin, YMin, XMax, YMax int
+}
+
+// Dx returns the width of the rectangle.
+func (r IntRect) Dx() int {
+	return r.XMax - r.XMin
+}
+
+// Dy returns the height of the rectangle.
+func (r IntRect) Dy() int {
+	return r.YMax - r.YMin
+}
