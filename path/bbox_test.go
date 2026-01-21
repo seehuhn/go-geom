@@ -381,3 +381,118 @@ func TestBBoxMoreCases(t *testing.T) {
 		}
 	})
 }
+
+func TestNumPoints(t *testing.T) {
+	tests := []struct {
+		cmd      Command
+		expected int
+	}{
+		{CmdMoveTo, 1},
+		{CmdLineTo, 1},
+		{CmdQuadTo, 2},
+		{CmdCubeTo, 3},
+		{CmdClose, 0},
+		{Command(99), 0}, // unknown command
+	}
+
+	for _, tt := range tests {
+		if got := tt.cmd.NumPoints(); got != tt.expected {
+			t.Errorf("Command(%d).NumPoints() = %d, want %d", tt.cmd, got, tt.expected)
+		}
+	}
+}
+
+func TestDataBuilder(t *testing.T) {
+	d := &Data{}
+	d.MoveTo(vec.Vec2{X: 0, Y: 0}).
+		LineTo(vec.Vec2{X: 10, Y: 0}).
+		QuadTo(vec.Vec2{X: 15, Y: 5}, vec.Vec2{X: 10, Y: 10}).
+		CubeTo(vec.Vec2{X: 5, Y: 15}, vec.Vec2{X: 0, Y: 15}, vec.Vec2{X: 0, Y: 10}).
+		Close()
+
+	expectedCmds := []Command{CmdMoveTo, CmdLineTo, CmdQuadTo, CmdCubeTo, CmdClose}
+	if len(d.Cmds) != len(expectedCmds) {
+		t.Fatalf("expected %d commands, got %d", len(expectedCmds), len(d.Cmds))
+	}
+	for i, cmd := range expectedCmds {
+		if d.Cmds[i] != cmd {
+			t.Errorf("Cmds[%d] = %v, want %v", i, d.Cmds[i], cmd)
+		}
+	}
+
+	// 1 + 1 + 2 + 3 = 7 coordinates
+	expectedCoordCount := 7
+	if len(d.Coords) != expectedCoordCount {
+		t.Errorf("expected %d coordinates, got %d", expectedCoordCount, len(d.Coords))
+	}
+}
+
+func TestDataIter(t *testing.T) {
+	d := &Data{}
+	d.MoveTo(vec.Vec2{X: 0, Y: 0}).
+		LineTo(vec.Vec2{X: 10, Y: 0}).
+		LineTo(vec.Vec2{X: 10, Y: 10}).
+		Close()
+
+	var results []struct {
+		cmd Command
+		pts []vec.Vec2
+	}
+
+	for cmd, pts := range d.Iter() {
+		ptsCopy := make([]vec.Vec2, len(pts))
+		copy(ptsCopy, pts)
+		results = append(results, struct {
+			cmd Command
+			pts []vec.Vec2
+		}{cmd, ptsCopy})
+	}
+
+	expected := []struct {
+		cmd Command
+		pts []vec.Vec2
+	}{
+		{CmdMoveTo, []vec.Vec2{{X: 0, Y: 0}}},
+		{CmdLineTo, []vec.Vec2{{X: 10, Y: 0}}},
+		{CmdLineTo, []vec.Vec2{{X: 10, Y: 10}}},
+		{CmdClose, []vec.Vec2{}},
+	}
+
+	if len(results) != len(expected) {
+		t.Fatalf("expected %d commands, got %d", len(expected), len(results))
+	}
+
+	for i, exp := range expected {
+		if results[i].cmd != exp.cmd {
+			t.Errorf("command %d: expected %v, got %v", i, exp.cmd, results[i].cmd)
+		}
+		if len(results[i].pts) != len(exp.pts) {
+			t.Errorf("command %d: expected %d points, got %d", i, len(exp.pts), len(results[i].pts))
+			continue
+		}
+		for j, pt := range exp.pts {
+			if results[i].pts[j] != pt {
+				t.Errorf("command %d, point %d: expected %v, got %v", i, j, pt, results[i].pts[j])
+			}
+		}
+	}
+}
+
+func TestDataIterChaining(t *testing.T) {
+	d := &Data{}
+	d.MoveTo(vec.Vec2{X: 0, Y: 0}).
+		LineTo(vec.Vec2{X: 5, Y: 0}).
+		LineTo(vec.Vec2{X: 5, Y: 5}).
+		Close()
+
+	// Test chaining: Data.Iter().Transform().BBox()
+	transform := [6]float64{2, 0, 0, 2, 10, 10} // scale by 2, translate by (10,10)
+	bbox := d.Iter().Transform(transform).BBox()
+
+	// Original: (0,0), (5,0), (5,5)
+	// After transform: (10,10), (20,10), (20,20)
+	expected := rect.Rect{LLx: 10, LLy: 10, URx: 20, URy: 20}
+	if bbox != expected {
+		t.Errorf("chained BBox() = %v, want %v", bbox, expected)
+	}
+}

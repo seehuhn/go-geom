@@ -33,6 +33,20 @@ const (
 	CmdClose
 )
 
+// NumPoints returns the number of points for this command.
+func (c Command) NumPoints() int {
+	switch c {
+	case CmdMoveTo, CmdLineTo:
+		return 1
+	case CmdQuadTo:
+		return 2
+	case CmdCubeTo:
+		return 3
+	default:
+		return 0
+	}
+}
+
 // Path iterates over individual segments.
 // The first argument is the segment type, which determines the number of points:
 //   - CmdMoveTo: 1 point (starts a new sub-path at the given point)
@@ -100,47 +114,71 @@ func (p Path) BBox() rect.Rect {
 	var bbox rect.Rect
 	first := true
 
-	for cmd, pts := range p {
-		switch cmd {
-		case CmdMoveTo, CmdLineTo:
-			if len(pts) >= 1 {
-				x, y := pts[0].X, pts[0].Y
-				if first {
-					bbox.LLx, bbox.LLy = x, y
-					bbox.URx, bbox.URy = x, y
-					first = false
-				} else {
-					bbox.Add(x, y)
-				}
-			}
-		case CmdQuadTo:
-			if len(pts) >= 2 {
-				for _, pt := range pts {
-					x, y := pt.X, pt.Y
-					if first {
-						bbox.LLx, bbox.LLy = x, y
-						bbox.URx, bbox.URy = x, y
-						first = false
-					} else {
-						bbox.Add(x, y)
-					}
-				}
-			}
-		case CmdCubeTo:
-			if len(pts) >= 3 {
-				for _, pt := range pts {
-					x, y := pt.X, pt.Y
-					if first {
-						bbox.LLx, bbox.LLy = x, y
-						bbox.URx, bbox.URy = x, y
-						first = false
-					} else {
-						bbox.Add(x, y)
-					}
-				}
+	for _, pts := range p {
+		for _, pt := range pts {
+			if first {
+				bbox.LLx, bbox.LLy = pt.X, pt.Y
+				bbox.URx, bbox.URy = pt.X, pt.Y
+				first = false
+			} else {
+				bbox.Add(pt.X, pt.Y)
 			}
 		}
 	}
 
 	return bbox
+}
+
+// Data is a compact, mutable representation of a path.
+type Data struct {
+	Cmds   []Command
+	Coords []vec.Vec2
+}
+
+// MoveTo starts a new sub-path at the given point.
+func (d *Data) MoveTo(p vec.Vec2) *Data {
+	d.Cmds = append(d.Cmds, CmdMoveTo)
+	d.Coords = append(d.Coords, p)
+	return d
+}
+
+// LineTo adds a line segment to the given point.
+func (d *Data) LineTo(p vec.Vec2) *Data {
+	d.Cmds = append(d.Cmds, CmdLineTo)
+	d.Coords = append(d.Coords, p)
+	return d
+}
+
+// QuadTo adds a quadratic Bezier curve.
+func (d *Data) QuadTo(ctrl, end vec.Vec2) *Data {
+	d.Cmds = append(d.Cmds, CmdQuadTo)
+	d.Coords = append(d.Coords, ctrl, end)
+	return d
+}
+
+// CubeTo adds a cubic Bezier curve.
+func (d *Data) CubeTo(ctrl1, ctrl2, end vec.Vec2) *Data {
+	d.Cmds = append(d.Cmds, CmdCubeTo)
+	d.Coords = append(d.Coords, ctrl1, ctrl2, end)
+	return d
+}
+
+// Close closes the current sub-path.
+func (d *Data) Close() *Data {
+	d.Cmds = append(d.Cmds, CmdClose)
+	return d
+}
+
+// Iter returns a Path iterator over the path data.
+func (d *Data) Iter() Path {
+	return func(yield func(Command, []vec.Vec2) bool) {
+		i := 0
+		for _, cmd := range d.Cmds {
+			n := cmd.NumPoints()
+			if !yield(cmd, d.Coords[i:i+n]) {
+				return
+			}
+			i += n
+		}
+	}
 }
