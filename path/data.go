@@ -34,6 +34,18 @@ func DataFromPath(p Path) *Data {
 	return data
 }
 
+func (d *Data) IsBlank() bool {
+	if d == nil {
+		return true
+	}
+	for _, cmd := range d.Cmds {
+		if cmd == CmdLineTo || cmd == CmdCubeTo {
+			return false
+		}
+	}
+	return true
+}
+
 // MoveTo starts a new sub-path at the given point.
 func (d *Data) MoveTo(p vec.Vec2) *Data {
 	d.Cmds = append(d.Cmds, CmdMoveTo)
