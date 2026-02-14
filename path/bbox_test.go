@@ -19,6 +19,7 @@ package path
 import (
 	"testing"
 
+	"seehuhn.de/go/geom/matrix"
 	"seehuhn.de/go/geom/rect"
 	"seehuhn.de/go/geom/vec"
 )
@@ -94,7 +95,7 @@ func TestTransform(t *testing.T) {
 
 	tests := []struct {
 		name      string
-		transform [6]float64
+		transform matrix.Matrix
 		expected  []struct {
 			cmd Command
 			pts []vec.Vec2
@@ -102,7 +103,7 @@ func TestTransform(t *testing.T) {
 	}{
 		{
 			name:      "identity transform",
-			transform: [6]float64{1, 0, 0, 1, 0, 0},
+			transform: matrix.Matrix{1, 0, 0, 1, 0, 0},
 			expected: []struct {
 				cmd Command
 				pts []vec.Vec2
@@ -114,7 +115,7 @@ func TestTransform(t *testing.T) {
 		},
 		{
 			name:      "translate by (2,3)",
-			transform: [6]float64{1, 0, 0, 1, 2, 3},
+			transform: matrix.Matrix{1, 0, 0, 1, 2, 3},
 			expected: []struct {
 				cmd Command
 				pts []vec.Vec2
@@ -126,7 +127,7 @@ func TestTransform(t *testing.T) {
 		},
 		{
 			name:      "scale by 2",
-			transform: [6]float64{2, 0, 0, 2, 0, 0},
+			transform: matrix.Matrix{2, 0, 0, 2, 0, 0},
 			expected: []struct {
 				cmd Command
 				pts []vec.Vec2
@@ -486,7 +487,7 @@ func TestDataIterChaining(t *testing.T) {
 		Close()
 
 	// Test chaining: Data.Iter().Transform().BBox()
-	transform := [6]float64{2, 0, 0, 2, 10, 10} // scale by 2, translate by (10,10)
+	transform := matrix.Matrix{2, 0, 0, 2, 10, 10} // scale by 2, translate by (10,10)
 	bbox := d.Iter().Transform(transform).BBox()
 
 	// Original: (0,0), (5,0), (5,5)

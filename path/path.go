@@ -19,6 +19,7 @@ package path
 import (
 	"iter"
 
+	"seehuhn.de/go/geom/matrix"
 	"seehuhn.de/go/geom/rect"
 	"seehuhn.de/go/geom/vec"
 )
@@ -57,7 +58,7 @@ func (c Command) NumPoints() int {
 type Path iter.Seq2[Command, []vec.Vec2]
 
 // Transform applies matrix M to the path.
-func (p Path) Transform(M [6]float64) Path {
+func (p Path) Transform(M matrix.Matrix) Path {
 	return func(yield func(Command, []vec.Vec2) bool) {
 		var buf [3]vec.Vec2
 		for cmd, pts := range p {
