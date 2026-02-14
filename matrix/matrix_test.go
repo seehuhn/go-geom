@@ -23,20 +23,20 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	"seehuhn.de/go/geom/vec"
 )
 
 // TestMulOrder verifies that the matrix A.Mul(B) is equivalent to first
 // applying A and then B.
 func TestMulOrder(t *testing.T) {
-	x0, y0 := 1.0, 2.0
+	v0 := vec.Vec2{X: 1, Y: 2}
 	for i, A := range testMatrices {
 		for j, B := range testMatrices {
 			t.Run(fmt.Sprintf("mat%d*mat%d", i, j), func(t *testing.T) {
-				x1, y1 := A.Mul(B).Apply(x0, y0)
-				x2, y2 := A.Apply(x0, y0)
-				x3, y3 := B.Apply(x2, y2)
-				if math.Abs(x1-x3) > 1e-6 || math.Abs(y1-y3) > 1e-6 {
-					t.Errorf("expected (%f, %f), got (%f, %f)", x3, y3, x1, y1)
+				v1 := A.Mul(B).Apply(v0)
+				v3 := B.Apply(A.Apply(v0))
+				if math.Abs(v1.X-v3.X) > 1e-6 || math.Abs(v1.Y-v3.Y) > 1e-6 {
+					t.Errorf("expected (%f, %f), got (%f, %f)", v3.X, v3.Y, v1.X, v1.Y)
 				}
 			})
 		}
@@ -111,9 +111,8 @@ var testMatrices = []Matrix{
 
 func BenchmarkApply(b *testing.B) {
 	M := Rotate(1)
-	x := 2.0
-	y := 3.0
+	v := vec.Vec2{X: 2, Y: 3}
 	for range b.N {
-		x, y = M.Apply(x, y)
+		v = M.Apply(v)
 	}
 }

@@ -16,7 +16,11 @@
 
 package matrix
 
-import "math"
+import (
+	"math"
+
+	"seehuhn.de/go/geom/vec"
+)
 
 // Matrix contains a PDF transformation matrix.
 // The elements are stored in the same order as for the "cm" operator.
@@ -38,8 +42,11 @@ func (M Matrix) IsZero() bool {
 }
 
 // Apply applies the transformation matrix to the given vector.
-func (M Matrix) Apply(x, y float64) (float64, float64) {
-	return x*M[0] + y*M[2] + M[4], x*M[1] + y*M[3] + M[5]
+func (M Matrix) Apply(v vec.Vec2) vec.Vec2 {
+	return vec.Vec2{
+		X: v.X*M[0] + v.Y*M[2] + M[4],
+		Y: v.X*M[1] + v.Y*M[3] + M[5],
+	}
 }
 
 // Mul multiplies two transformation matrices and returns the result.
