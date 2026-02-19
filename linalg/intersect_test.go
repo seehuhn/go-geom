@@ -18,6 +18,7 @@ package linalg
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"seehuhn.de/go/geom/vec"
@@ -195,19 +196,12 @@ func TestMiter(t *testing.T) {
 				}
 			} else {
 				const eps = 1e-9
-				if abs(miter.X-tc.expected.X) > eps || abs(miter.Y-tc.expected.Y) > eps {
+				if math.Abs(miter.X-tc.expected.X) > eps || math.Abs(miter.Y-tc.expected.Y) > eps {
 					t.Errorf("expected miter=%v, got %v", tc.expected, miter)
 				}
 			}
 		})
 	}
-}
-
-func abs(x float64) float64 {
-	if x < 0 {
-		return -x
-	}
-	return x
 }
 
 func TestIntersectionProperties(t *testing.T) {
@@ -291,7 +285,7 @@ func TestMiterProperties(t *testing.T) {
 			innerDist := innerMiter.Sub(b).Length()
 
 			const eps = 1e-9
-			if abs(outerDist-innerDist) > eps {
+			if math.Abs(outerDist-innerDist) > eps {
 				t.Errorf("outer and inner miter should be equidistant from corner: outer=%v, inner=%v", outerDist, innerDist)
 			}
 		}
