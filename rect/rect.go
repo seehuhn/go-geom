@@ -16,7 +16,12 @@
 
 package rect
 
-import "math"
+import (
+	"math"
+
+	"seehuhn.de/go/geom/matrix"
+	"seehuhn.de/go/geom/vec"
+)
 
 // Rect represents an axis-aligned rectangle.
 type Rect struct {
@@ -93,6 +98,22 @@ func (r Rect) Rounded() Rect {
 	r.URx = math.Ceil(r.URx)
 	r.URy = math.Ceil(r.URy)
 	return r
+}
+
+// Transform maps the four corners of r through M and returns their axis-aligned
+// bounding box.  When M rotates or shears, the mapped rectangle is no longer
+// axis-aligned, so the result is the smallest Rect that contains it.
+func (r Rect) Transform(M matrix.Matrix) Rect {
+	p0 := M.Apply(vec.Vec2{X: r.LLx, Y: r.LLy})
+	p1 := M.Apply(vec.Vec2{X: r.URx, Y: r.LLy})
+	p2 := M.Apply(vec.Vec2{X: r.LLx, Y: r.URy})
+	p3 := M.Apply(vec.Vec2{X: r.URx, Y: r.URy})
+	return Rect{
+		LLx: min(p0.X, p1.X, p2.X, p3.X),
+		LLy: min(p0.Y, p1.Y, p2.Y, p3.Y),
+		URx: max(p0.X, p1.X, p2.X, p3.X),
+		URy: max(p0.Y, p1.Y, p2.Y, p3.Y),
+	}
 }
 
 // IntRect represents an axis-aligned rectangle with integer coordinates.

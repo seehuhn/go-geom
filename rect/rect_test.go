@@ -18,10 +18,13 @@ package rect
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+
+	"seehuhn.de/go/geom/matrix"
 )
 
 func TestIsZero(t *testing.T) {
@@ -288,6 +291,32 @@ func TestRectProperties(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestTransform(t *testing.T) {
+	unit := Rect{0, 0, 1, 1}
+	tests := []struct {
+		name string
+		r    Rect
+		m    matrix.Matrix
+		want Rect
+	}{
+		{"identity", unit, matrix.Identity, unit},
+		{"translate", unit, matrix.Translate(2, 3), Rect{2, 3, 3, 4}},
+		{"scale", unit, matrix.Scale(2, 4), Rect{0, 0, 2, 4}},
+		{"rotate 90°", unit, matrix.Rotate(math.Pi / 2), Rect{-1, 0, 0, 1}},
+		// a shear maps the unit square to a parallelogram; the result is its bbox
+		{"shear x", unit, matrix.Matrix{1, 0, 1, 1, 0, 0}, Rect{0, 0, 2, 1}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.r.Transform(tt.m)
+			if diff := cmp.Diff(tt.want, got, cmpopts.EquateApprox(0, 1e-9)); diff != "" {
+				t.Errorf("Transform (-want +got):\n%s", diff)
+			}
+		})
+	}
 }
 
 func BenchmarkAdd(b *testing.B) {
