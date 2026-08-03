@@ -55,6 +55,12 @@ func (c Command) NumPoints() int {
 //   - CmdQuadTo: 2 points (control point and endpoint of the quadratic Bezier curve)
 //   - CmdCubeTo: 3 points (control point 1, control point 2, and endpoint of the cubic Bezier curve)
 //   - CmdClose: 0 points (straight line from the current point to start of the current sub-path)
+//
+// CmdClose leaves the current point at the start of the sub-path it closed.
+// A drawing command which follows a CmdClose without an intervening CmdMoveTo
+// therefore starts a new sub-path at that point.  This matches the closepath
+// operator of the PostScript language and the "h" operator of PDF content
+// streams.
 type Path iter.Seq2[Command, []vec.Vec2]
 
 // Transform applies matrix M to the path.
