@@ -118,6 +118,10 @@ func (r Rect) Transform(M matrix.Matrix) Rect {
 
 // IntRect represents an axis-aligned rectangle with integer coordinates.
 // This is used for pixel-based operations such as image dimensions.
+//
+// The rectangle is half-open: it contains the points (x, y) with
+// XMin <= x < XMax and YMin <= y < YMax.  A rectangle with XMin >= XMax
+// or YMin >= YMax is empty.
 type IntRect struct {
 	XMin, YMin, XMax, YMax int
 }
