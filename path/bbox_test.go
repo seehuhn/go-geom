@@ -70,9 +70,7 @@ func TestBBoxWithCurves(t *testing.T) {
 }
 
 func TestBBoxEmpty(t *testing.T) {
-	path := func(yield func(Command, []vec.Vec2) bool) {}
-
-	bbox := Path(path).BBox()
+	bbox := Empty.BBox()
 
 	expected := rect.Rect{}
 	if bbox != expected {

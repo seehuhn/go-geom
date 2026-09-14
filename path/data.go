@@ -34,12 +34,11 @@ func DataFromPath(p Path) *Data {
 	return data
 }
 
+// IsBlank reports whether the path draws no marks on the page.
 func (d *Data) IsBlank() bool {
-	if d == nil {
-		return true
-	}
 	for _, cmd := range d.Cmds {
-		if cmd == CmdLineTo || cmd == CmdCubeTo {
+		switch cmd {
+		case CmdLineTo, CmdQuadTo, CmdCubeTo:
 			return false
 		}
 	}

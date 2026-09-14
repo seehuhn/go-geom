@@ -63,6 +63,9 @@ func (c Command) NumPoints() int {
 // streams.
 type Path iter.Seq2[Command, []vec.Vec2]
 
+// Empty is a path which contains no segments.
+var Empty Path = func(yield func(Command, []vec.Vec2) bool) {}
+
 // Transform applies matrix M to the path.
 func (p Path) Transform(M matrix.Matrix) Path {
 	return func(yield func(Command, []vec.Vec2) bool) {
