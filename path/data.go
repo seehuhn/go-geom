@@ -34,15 +34,10 @@ func DataFromPath(p Path) *Data {
 	return data
 }
 
-// IsBlank reports whether the path draws no marks on the page.
+// IsBlank reports whether the path is empty, i.e. whether it contains no
+// commands at all.
 func (d *Data) IsBlank() bool {
-	for _, cmd := range d.Cmds {
-		switch cmd {
-		case CmdLineTo, CmdQuadTo, CmdCubeTo:
-			return false
-		}
-	}
-	return true
+	return len(d.Cmds) == 0
 }
 
 // MoveTo starts a new sub-path at the given point.

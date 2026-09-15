@@ -33,8 +33,8 @@ func TestIsBlank(t *testing.T) {
 		expected bool
 	}{
 		{"empty", &Data{}, true},
-		{"move only", (&Data{}).MoveTo(a), true},
-		{"degenerate sub-path", (&Data{}).MoveTo(a).Close(), true},
+		{"move only", (&Data{}).MoveTo(a), false},
+		{"degenerate sub-path", (&Data{}).MoveTo(a).Close(), false},
 		{"line", (&Data{}).MoveTo(a).LineTo(b), false},
 		{"quadratic curve", (&Data{}).MoveTo(a).QuadTo(b, c), false},
 		{"cubic curve", (&Data{}).MoveTo(a).CubeTo(a, b, c), false},
