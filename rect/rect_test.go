@@ -340,3 +340,32 @@ func BenchmarkRounded(b *testing.B) {
 		_ = r.Rounded()
 	}
 }
+
+func TestGrow(t *testing.T) {
+	r := Rect{LLx: 1, LLy: 2, URx: 5, URy: 8}
+
+	if got, want := r.Grow(0), r; got != want {
+		t.Errorf("Grow(0) = %v, want %v", got, want)
+	}
+
+	got := r.Grow(1.5)
+	want := Rect{LLx: -0.5, LLy: 0.5, URx: 6.5, URy: 9.5}
+	if got != want {
+		t.Errorf("Grow(1.5) = %v, want %v", got, want)
+	}
+	if got.Dx() != r.Dx()+3 || got.Dy() != r.Dy()+3 {
+		t.Errorf("Grow(1.5) gave size %gx%g, want %gx%g",
+			got.Dx(), got.Dy(), r.Dx()+3, r.Dy()+3)
+	}
+
+	// shrinking back gives the original rectangle
+	if back := got.Grow(-1.5); back != r {
+		t.Errorf("Grow(1.5).Grow(-1.5) = %v, want %v", back, r)
+	}
+
+	// shrinking past empty turns the rectangle inside out rather than
+	// collapsing it
+	if inv := r.Grow(-10); !(inv.Dx() < 0 && inv.Dy() < 0) {
+		t.Errorf("Grow(-10) = %v, want an inside-out rectangle", inv)
+	}
+}

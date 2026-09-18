@@ -19,6 +19,7 @@ package linalg
 import (
 	"fmt"
 	"math"
+	"math/rand"
 	"testing"
 
 	"seehuhn.de/go/geom/vec"
@@ -475,5 +476,406 @@ func TestMiterAwayFromOrigin(t *testing.T) {
 	}
 	if _, ok := Miter(fa, fb, fc, arm/10, true); ok {
 		t.Errorf("corner with arms of %g at %g was accepted", arm, far)
+	}
+}
+
+func TestSegmentIntersection(t *testing.T) {
+	type testCase struct {
+		name           string
+		a1, a2, b1, b2 vec.Vec2
+		p              vec.Vec2
+		tt, ss         float64
+		ok             bool
+	}
+	testCases := []testCase{
+		{
+			name: "crossing at the middle",
+			a1:   vec.Vec2{X: -1, Y: 0}, a2: vec.Vec2{X: 1, Y: 0},
+			b1: vec.Vec2{X: 0, Y: -1}, b2: vec.Vec2{X: 0, Y: 1},
+			p: vec.Vec2{X: 0, Y: 0}, tt: 0.5, ss: 0.5, ok: true,
+		},
+		{
+			name: "crossing at a quarter",
+			a1:   vec.Vec2{X: 0, Y: 0}, a2: vec.Vec2{X: 4, Y: 0},
+			b1: vec.Vec2{X: 1, Y: -1}, b2: vec.Vec2{X: 1, Y: 3},
+			p: vec.Vec2{X: 1, Y: 0}, tt: 0.25, ss: 0.25, ok: true,
+		},
+		{
+			name: "touching at the start of the first segment",
+			a1:   vec.Vec2{X: 0, Y: 0}, a2: vec.Vec2{X: 1, Y: 0},
+			b1: vec.Vec2{X: 0, Y: -1}, b2: vec.Vec2{X: 0, Y: 1},
+			p: vec.Vec2{X: 0, Y: 0}, tt: 0, ss: 0.5, ok: true,
+		},
+		{
+			name: "touching at the end of the first segment",
+			a1:   vec.Vec2{X: 0, Y: 0}, a2: vec.Vec2{X: 1, Y: 0},
+			b1: vec.Vec2{X: 1, Y: -1}, b2: vec.Vec2{X: 1, Y: 1},
+			p: vec.Vec2{X: 1, Y: 0}, tt: 1, ss: 0.5, ok: true,
+		},
+		{
+			name: "touching at the end of the second segment",
+			a1:   vec.Vec2{X: -1, Y: 0}, a2: vec.Vec2{X: 1, Y: 0},
+			b1: vec.Vec2{X: 0, Y: -1}, b2: vec.Vec2{X: 0, Y: 0},
+			p: vec.Vec2{X: 0, Y: 0}, tt: 0.5, ss: 1, ok: true,
+		},
+		{
+			name: "touching at the start of the second segment",
+			a1:   vec.Vec2{X: -1, Y: 0}, a2: vec.Vec2{X: 1, Y: 0},
+			b1: vec.Vec2{X: 0, Y: 0}, b2: vec.Vec2{X: 0, Y: 1},
+			p: vec.Vec2{X: 0, Y: 0}, tt: 0.5, ss: 0, ok: true,
+		},
+		{
+			// the first segment starts on the second, where the cross
+			// product which gives its parameter can come out as a
+			// negative zero
+			name: "starting on the second segment",
+			a1:   vec.Vec2{X: 0.1, Y: 0}, a2: vec.Vec2{X: 0.1, Y: 1},
+			b1: vec.Vec2{X: 0, Y: 0}, b2: vec.Vec2{X: 1, Y: 0},
+			p: vec.Vec2{X: 0.1, Y: 0}, tt: 0, ss: 0.1, ok: true,
+		},
+		{
+			name: "lines cross beyond the end of the first segment",
+			a1:   vec.Vec2{X: 0, Y: 0}, a2: vec.Vec2{X: 1, Y: 0},
+			b1: vec.Vec2{X: 2, Y: -1}, b2: vec.Vec2{X: 2, Y: 1},
+		},
+		{
+			name: "lines cross before the start of the first segment",
+			a1:   vec.Vec2{X: 0, Y: 0}, a2: vec.Vec2{X: 1, Y: 0},
+			b1: vec.Vec2{X: -2, Y: -1}, b2: vec.Vec2{X: -2, Y: 1},
+		},
+		{
+			name: "lines cross beyond the end of the second segment",
+			a1:   vec.Vec2{X: -1, Y: 0}, a2: vec.Vec2{X: 1, Y: 0},
+			b1: vec.Vec2{X: 0, Y: 1}, b2: vec.Vec2{X: 0, Y: 2},
+		},
+		{
+			name: "parallel segments",
+			a1:   vec.Vec2{X: 0, Y: 0}, a2: vec.Vec2{X: 1, Y: 0},
+			b1: vec.Vec2{X: 0, Y: 1}, b2: vec.Vec2{X: 1, Y: 1},
+		},
+		{
+			name: "collinear overlapping segments",
+			a1:   vec.Vec2{X: 0, Y: 0}, a2: vec.Vec2{X: 2, Y: 0},
+			b1: vec.Vec2{X: 1, Y: 0}, b2: vec.Vec2{X: 3, Y: 0},
+		},
+		{
+			name: "first segment degenerate",
+			a1:   vec.Vec2{X: 1, Y: 1}, a2: vec.Vec2{X: 1, Y: 1},
+			b1: vec.Vec2{X: 0, Y: 1}, b2: vec.Vec2{X: 2, Y: 1},
+		},
+		{
+			name: "second segment degenerate",
+			a1:   vec.Vec2{X: 0, Y: 1}, a2: vec.Vec2{X: 2, Y: 1},
+			b1: vec.Vec2{X: 1, Y: 1}, b2: vec.Vec2{X: 1, Y: 1},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			p, tParam, sParam, ok := SegmentIntersection(tc.a1, tc.a2, tc.b1, tc.b2)
+			if ok != tc.ok {
+				t.Fatalf("ok = %v, want %v", ok, tc.ok)
+			}
+			if !ok {
+				if p != (vec.Vec2{}) || tParam != 0 || sParam != 0 {
+					t.Errorf("failed call returned %v, %g, %g", p, tParam, sParam)
+				}
+				return
+			}
+			if math.Abs(tParam-tc.tt) > 1e-12 || math.Abs(sParam-tc.ss) > 1e-12 {
+				t.Errorf("t, s = %g, %g, want %g, %g", tParam, sParam, tc.tt, tc.ss)
+			}
+			// a parameter of zero must not carry a sign, so that a caller
+			// which divides by it or tests its sign sees the same thing
+			// whichever way the cross product rounded
+			if math.Signbit(tParam) || math.Signbit(sParam) {
+				t.Errorf("t, s = %g, %g, want no sign on a zero", tParam, sParam)
+			}
+			if math.Abs(p.X-tc.p.X) > 1e-12 || math.Abs(p.Y-tc.p.Y) > 1e-12 {
+				t.Errorf("point = %v, want %v", p, tc.p)
+			}
+			// the point must lie on the second segment too
+			q := tc.b1.Add(tc.b2.Sub(tc.b1).Mul(sParam))
+			if math.Abs(p.X-q.X) > 1e-12 || math.Abs(p.Y-q.Y) > 1e-12 {
+				t.Errorf("point = %v, but s puts it at %v", p, q)
+			}
+		})
+	}
+}
+
+// TestSegmentIntersectionScale checks that the crossing is still found when
+// the segments are far from the origin and short compared to their distance
+// from it, where forming the products from the raw coordinates would lose
+// every significant digit.
+func TestSegmentIntersectionScale(t *testing.T) {
+	for _, scale := range []float64{1, 1e6, 1e12, 1e100} {
+		base := vec.Vec2{X: scale, Y: scale}
+		// The segments are short compared to the distance from the origin,
+		// but not so short that their endpoints round onto each other.
+		d := scale * 1e-6
+		a1 := base.Add(vec.Vec2{X: -d, Y: 0})
+		a2 := base.Add(vec.Vec2{X: d, Y: 0})
+		b1 := base.Add(vec.Vec2{X: 0, Y: -d})
+		b2 := base.Add(vec.Vec2{X: 0, Y: d})
+
+		p, tParam, sParam, ok := SegmentIntersection(a1, a2, b1, b2)
+		if !ok {
+			t.Errorf("scale %g: no intersection found", scale)
+			continue
+		}
+		// The endpoints are only held to a relative precision, so the
+		// parameters can be no more accurate than that precision measured
+		// against the length of the segments.
+		if math.Abs(tParam-0.5) > 1e-8 || math.Abs(sParam-0.5) > 1e-8 {
+			t.Errorf("scale %g: t, s = %g, %g, want 0.5, 0.5", scale, tParam, sParam)
+		}
+		tol := 1e-12 * scale
+		if math.Abs(p.X-base.X) > tol || math.Abs(p.Y-base.Y) > tol {
+			t.Errorf("scale %g: point = %v, want %v", scale, p, base)
+		}
+	}
+}
+
+// TestSegmentIntersectionSharedEndpoint checks that a segment which ends
+// exactly on the end of another is always found to cross it, and that the
+// crossing reported is that endpoint itself.  The parameter of such a
+// crossing rounds to either side of 1, so an exact range test would reject
+// about a third of these, and an exact comparison would leave others a
+// rounding error short of the endpoint.
+func TestSegmentIntersectionSharedEndpoint(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	random := func() vec.Vec2 {
+		return vec.Vec2{X: rng.Float64()*10 - 5, Y: rng.Float64()*10 - 5}
+	}
+	for i := range 10000 {
+		a1, a2, b1 := random(), random(), random()
+		p, tParam, sParam, ok := SegmentIntersection(a1, a2, b1, a2)
+		if !ok {
+			t.Errorf("trial %d: shared endpoint %v not found", i, a2)
+			continue
+		}
+		if p != a2 || tParam != 1 || sParam != 1 {
+			t.Errorf("trial %d: got %v, %g, %g, want %v, 1, 1", i, p, tParam, sParam, a2)
+		}
+
+		// the same, with the shared endpoint at the start of both
+		p, tParam, sParam, ok = SegmentIntersection(a2, a1, a2, b1)
+		if !ok {
+			t.Errorf("trial %d: shared start %v not found", i, a2)
+			continue
+		}
+		if p != a2 || tParam != 0 || sParam != 0 {
+			t.Errorf("trial %d: got %v, %g, %g, want %v, 0, 0", i, p, tParam, sParam, a2)
+		}
+	}
+}
+
+// TestSegmentIntersectionNearMiss checks that a crossing which falls beyond
+// an end by more than the slack is still rejected, while one within the slack
+// on either side is snapped to the end.
+func TestSegmentIntersectionNearMiss(t *testing.T) {
+	a1 := vec.Vec2{X: 0, Y: 0}
+	a2 := vec.Vec2{X: 1, Y: 0}
+	b1 := vec.Vec2{X: 1, Y: -1}
+
+	// the second segment stops short of the first by 10 times the slack
+	b2 := vec.Vec2{X: 1, Y: -10 * endTol}
+	if _, _, _, ok := SegmentIntersection(a1, a2, b1, b2); ok {
+		t.Error("a crossing beyond the slack was accepted")
+	}
+
+	// and by a tenth of it
+	b2 = vec.Vec2{X: 1, Y: -endTol / 10}
+	p, tParam, sParam, ok := SegmentIntersection(a1, a2, b1, b2)
+	if !ok {
+		t.Fatal("a crossing within the slack was rejected")
+	}
+	if p != a2 || tParam != 1 || sParam != 1 {
+		t.Errorf("got %v, %g, %g, want %v, 1, 1", p, tParam, sParam, a2)
+	}
+
+	// crossing a tenth of the slack inside the end snaps to it as well
+	b2 = vec.Vec2{X: 1, Y: endTol / 10}
+	p, tParam, sParam, ok = SegmentIntersection(a1, a2, b1, b2)
+	if !ok {
+		t.Fatal("a crossing inside the end was rejected")
+	}
+	if p != a2 || tParam != 1 || sParam != 1 {
+		t.Errorf("got %v, %g, %g, want %v, 1, 1", p, tParam, sParam, a2)
+	}
+}
+
+// TestSegmentIntersectionSymmetry checks that swapping the two segments finds
+// the same crossing point.
+func TestSegmentIntersectionSymmetry(t *testing.T) {
+	a1 := vec.Vec2{X: -3, Y: -1}
+	a2 := vec.Vec2{X: 5, Y: 7}
+	b1 := vec.Vec2{X: -2, Y: 6}
+	b2 := vec.Vec2{X: 4, Y: -2}
+
+	p1, t1, s1, ok1 := SegmentIntersection(a1, a2, b1, b2)
+	p2, t2, s2, ok2 := SegmentIntersection(b1, b2, a1, a2)
+	if !ok1 || !ok2 {
+		t.Fatalf("ok = %v, %v, want true, true", ok1, ok2)
+	}
+	if math.Abs(p1.X-p2.X) > 1e-12 || math.Abs(p1.Y-p2.Y) > 1e-12 {
+		t.Errorf("points differ: %v vs %v", p1, p2)
+	}
+	// swapping the segments swaps the roles of the two parameters
+	if math.Abs(t1-s2) > 1e-12 || math.Abs(s1-t2) > 1e-12 {
+		t.Errorf("parameters %g, %g do not mirror %g, %g", t1, s1, t2, s2)
+	}
+}
+
+func TestMiterLength(t *testing.T) {
+	type testCase struct {
+		name       string
+		in, out    vec.Vec2
+		miterLimit float64
+		want       float64
+		ok         bool
+	}
+	testCases := []testCase{
+		{
+			// a straight join reaches exactly half the line width
+			name: "straight",
+			in:   vec.Vec2{X: 1, Y: 0}, out: vec.Vec2{X: 1, Y: 0},
+			miterLimit: 10, want: 1, ok: true,
+		},
+		{
+			// a right angle turn: miter ratio sqrt(2)
+			name: "right angle",
+			in:   vec.Vec2{X: 1, Y: 0}, out: vec.Vec2{X: 0, Y: 1},
+			miterLimit: 10, want: math.Sqrt2, ok: true,
+		},
+		{
+			// 60 degrees of turn: miter ratio 2/sqrt(3)
+			name: "sixty degree turn",
+			in:   vec.Vec2{X: 1, Y: 0}, out: vec.Vec2{X: 0.5, Y: math.Sqrt(3) / 2},
+			miterLimit: 10, want: 2 / math.Sqrt(3), ok: true,
+		},
+		{
+			name: "right angle below the limit",
+			in:   vec.Vec2{X: 1, Y: 0}, out: vec.Vec2{X: 0, Y: 1},
+			miterLimit: 1.2, want: 1, ok: false,
+		},
+		{
+			// the segments double back, so the miter runs off to infinity
+			name: "reversal",
+			in:   vec.Vec2{X: 1, Y: 0}, out: vec.Vec2{X: -1, Y: 0},
+			miterLimit: 1e6, want: 1, ok: false,
+		},
+		{
+			name: "zero incoming direction",
+			in:   vec.Vec2{}, out: vec.Vec2{X: 0, Y: 1},
+			miterLimit: 10, want: 1, ok: false,
+		},
+		{
+			name: "zero outgoing direction",
+			in:   vec.Vec2{X: 1, Y: 0}, out: vec.Vec2{},
+			miterLimit: 10, want: 1, ok: false,
+		},
+		{
+			// a limit below 1 is shorter than any miter
+			name: "limit below one",
+			in:   vec.Vec2{X: 1, Y: 0}, out: vec.Vec2{X: 1, Y: 0},
+			miterLimit: 0.5, want: 1, ok: false,
+		},
+	}
+
+	const lineWidth = 2
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := MiterLength(tc.in, tc.out, lineWidth, tc.miterLimit)
+			if ok != tc.ok {
+				t.Fatalf("ok = %v, want %v", ok, tc.ok)
+			}
+			if math.Abs(got-tc.want) > 1e-12 {
+				t.Errorf("length = %g, want %g", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMiterLengthAtLimit checks that a corner sitting exactly on the miter
+// limit is mitered, whichever side the rounding error of the ratio falls on.
+func TestMiterLengthAtLimit(t *testing.T) {
+	// A right angle has a miter ratio of exactly sqrt(2).
+	in := vec.Vec2{X: 1, Y: 0}
+	out := vec.Vec2{X: 0, Y: 1}
+
+	if _, ok := MiterLength(in, out, 2, math.Sqrt2); !ok {
+		t.Error("a corner exactly on the limit should be mitered")
+	}
+	// Just below the limit by more than the slack, it bevels.
+	if _, ok := MiterLength(in, out, 2, math.Sqrt2*(1-1e-9)); ok {
+		t.Error("a corner past the limit should be bevelled")
+	}
+}
+
+// TestMiterLengthSharpCorner checks the length reported for corners which
+// nearly double back.  Taking the half angle from the cosine of the turn
+// leaves no significant digits there: the cosine is close to -1, and adding
+// one to it cancels away everything the cosine had.
+func TestMiterLengthSharpCorner(t *testing.T) {
+	const lineWidth = 2
+	in := vec.Vec2{X: 1, Y: 0}
+	for _, turn := range []float64{1e-2, 1e-4, 1e-6, 1e-8} {
+		// the direction turns by pi-turn, so the interior angle is turn and
+		// the miter reaches lineWidth/2/sin(turn/2) from the corner
+		out := vec.Vec2{X: -math.Cos(turn), Y: math.Sin(turn)}
+		want := lineWidth / 2 / math.Sin(turn/2)
+
+		got, ok := MiterLength(in, out, lineWidth, 1e12)
+		if !ok {
+			t.Errorf("turn %g: expected a miter", turn)
+			continue
+		}
+		if math.Abs(got-want) > 1e-9*want {
+			t.Errorf("turn %g: length = %g, want %g", turn, got, want)
+		}
+
+		// The limit is on the whole miter, twice the length returned, so
+		// this corner sits exactly on a limit of 2*want/lineWidth.
+		if _, ok := MiterLength(in, out, lineWidth, 2*want/lineWidth); !ok {
+			t.Errorf("turn %g: a corner on the limit should be mitered", turn)
+		}
+	}
+}
+
+// TestMiterLengthScale checks that the result does not depend on how long the
+// direction vectors are, nor on the scale they are expressed in.
+func TestMiterLengthScale(t *testing.T) {
+	want, ok := MiterLength(vec.Vec2{X: 1, Y: 0}, vec.Vec2{X: 0, Y: 1}, 2, 10)
+	if !ok {
+		t.Fatal("expected a miter")
+	}
+	for _, scale := range []float64{1e-150, 1e-6, 1, 1e6, 1e150} {
+		in := vec.Vec2{X: scale, Y: 0}
+		out := vec.Vec2{X: 0, Y: scale}
+		got, ok := MiterLength(in, out, 2, 10)
+		if !ok {
+			t.Errorf("scale %g: expected a miter", scale)
+			continue
+		}
+		if math.Abs(got-want) > 1e-12 {
+			t.Errorf("scale %g: length = %g, want %g", scale, got, want)
+		}
+	}
+}
+
+// TestMiterLengthSymmetry checks that reversing the corner, so that the two
+// segments swap roles, gives the same miter length.
+func TestMiterLengthSymmetry(t *testing.T) {
+	in := vec.Vec2{X: 3, Y: 1}
+	out := vec.Vec2{X: -1, Y: 4}
+
+	a, okA := MiterLength(in, out, 2, 10)
+	b, okB := MiterLength(out.Neg(), in.Neg(), 2, 10)
+	if okA != okB {
+		t.Fatalf("ok = %v, %v", okA, okB)
+	}
+	if math.Abs(a-b) > 1e-12 {
+		t.Errorf("lengths differ: %g vs %g", a, b)
 	}
 }

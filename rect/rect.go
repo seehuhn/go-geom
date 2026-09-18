@@ -43,6 +43,8 @@ func (r Rect) Dy() float64 {
 	return r.URy - r.LLy
 }
 
+// Covers reports whether the rectangle contains all of other, counting a
+// shared edge as covered.
 func (r Rect) Covers(other Rect) bool {
 	return r.LLx <= other.LLx && r.LLy <= other.LLy && r.URx >= other.URx && r.URy >= other.URy
 }
@@ -63,6 +65,9 @@ func (r *Rect) Add(x, y float64) {
 	}
 }
 
+// Extend enlarges the rectangle if necessary to include all of other.  The
+// zero value stands for an empty rectangle here rather than for a point at the
+// origin: extending by it changes nothing, and extending it gives other.
 func (r *Rect) Extend(other Rect) {
 	if other.IsZero() {
 		return
@@ -85,6 +90,9 @@ func (r *Rect) Extend(other Rect) {
 	}
 }
 
+// Scale multiplies all four coordinates by factor, moving the rectangle
+// towards or away from the origin as well as changing its size.  A negative
+// factor reflects the rectangle through the origin and turns it inside out.
 func (r *Rect) Scale(factor float64) {
 	r.LLx *= factor
 	r.LLy *= factor
@@ -92,6 +100,21 @@ func (r *Rect) Scale(factor float64) {
 	r.URy *= factor
 }
 
+// Grow returns the rectangle enlarged by d on each of its four sides, so that
+// it becomes 2*d wider and 2*d taller.  A negative d shrinks the rectangle
+// instead, and shrinking by more than half the width or height turns the
+// rectangle inside out rather than collapsing it to an empty one.
+func (r Rect) Grow(d float64) Rect {
+	return Rect{
+		LLx: r.LLx - d,
+		LLy: r.LLy - d,
+		URx: r.URx + d,
+		URy: r.URy + d,
+	}
+}
+
+// Rounded returns the smallest rectangle with integer coordinates which
+// contains this one.
 func (r Rect) Rounded() Rect {
 	r.LLx = math.Floor(r.LLx)
 	r.LLy = math.Floor(r.LLy)
