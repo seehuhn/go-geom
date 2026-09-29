@@ -18,7 +18,6 @@ package path
 
 import (
 	"fmt"
-	"math"
 
 	"seehuhn.de/go/geom/linalg"
 	"seehuhn.de/go/geom/rect"
@@ -108,65 +107,160 @@ type StrokeOptions struct {
 	// two are compared.  Zero stands for [DefaultMiterLimit], since a limit
 	// below one is shorter than any miter and would bevel every corner.
 	MiterLimit float64
+
+	// Dashed says that the stroke is drawn with a dash pattern.  Every dash
+	// is capped, and a dash can end or start on any vertex, so the stroke
+	// can then reach beyond the undashed one near the vertices.
+	Dashed bool
 }
 
-// PolylineStrokeBBox returns an axis-aligned rectangle containing the stroke
-// drawn along the given polylines.  Each sub-path is the list of its
-// vertices, joined by straight segments.  closed says whether a segment runs
-// from the last vertex of each sub-path back to its first, which gives the
-// sub-path a join at every vertex and no ends to cap.
+// PolylineStrokeBBox returns the smallest axis-aligned rectangle containing
+// the stroke drawn along the given polylines.  Each sub-path is the list of
+// its vertices, joined by straight segments.  closed says whether a segment
+// runs from the last vertex of each sub-path back to its first, which gives
+// the sub-path a join at every vertex and no ends to cap.
 //
-// Each vertex is bounded by the square around it which holds everything the
-// stroke draws there, and the tip of a miter join is taken in as the single
-// point it is.  The result is exact for a miter join and for a projecting
-// square cap.  For a butt or round cap and for a round or bevel join it is
-// the square around a disc of half the line width, which can reach up to
-// half the line width further than the stroke itself does.
+// A sub-path whose vertices all coincide, including one with a single vertex,
+// is a zero-length line.  With round caps it is drawn as a disc of the line
+// width.  With butt or square caps it draws nothing, since the caps have no
+// direction to point in.
 //
-// The second result is false where no sub-path has a vertex, in which case
+// With opt.Dashed set, the rectangle is the smallest one containing the
+// stroke for every dash pattern and phase.
+//
+// The second result is false where the stroke draws nothing, in which case
 // there is nothing to bound.
 func PolylineStrokeBBox(subpaths [][]vec.Vec2, closed bool, opt StrokeOptions) (rect.Rect, bool) {
-	var bbox rect.Rect
-	seeded := false
-
 	if opt.MiterLimit == 0 {
 		opt.MiterLimit = DefaultMiterLimit
 	}
 
-	half := opt.Width / 2
-	extend := func(p vec.Vec2, r float64) {
-		if !seeded {
-			bbox = rect.Rect{LLx: p.X - r, LLy: p.Y - r, URx: p.X + r, URy: p.Y + r}
-			seeded = true
-			return
-		}
-		bbox.Add(p.X-r, p.Y-r)
-		bbox.Add(p.X+r, p.Y+r)
-	}
-
+	b := &strokeBounds{half: opt.Width / 2}
 	for _, pts := range subpaths {
 		pts = distinctVertices(pts, closed)
 		n := len(pts)
-		for i, p := range pts {
-			if !closed && (i == 0 || i == n-1) {
-				// an end of an open path carries a cap, not a join
-				r := half
-				if opt.Cap == CapSquare {
-					r = squareCapReach(capDirection(pts, i), half)
-				}
-				extend(p, r)
-				continue
+		if n == 0 {
+			continue
+		}
+		if n == 1 {
+			if opt.Cap == CapRound {
+				b.disc(pts[0])
 			}
+			continue
+		}
 
-			extend(p, half)
-			if opt.Join == JoinMiter {
-				if tip, ok := miterTip(pts[(i+n-1)%n], p, pts[(i+1)%n], opt); ok {
-					extend(tip, 0)
-				}
+		// The stroke is the union of one rectangle per segment, a join at
+		// each corner and a cap at each end.  Where two segments meet, the
+		// rectangles' corners already hold a bevel join, and at an open end
+		// they hold a butt cap.  A dash has its own caps, which along a
+		// segment stay within the segment's rectangle and reach furthest out
+		// where the dash ends or starts on one of its end points.
+		numSeg := n - 1
+		if closed {
+			numSeg = n
+		}
+		for i := range numSeg {
+			p, q := pts[i], pts[(i+1)%n]
+			side := q.Sub(p).Rot90().Normalize().Mul(b.half)
+			b.add(p.Add(side))
+			b.add(p.Sub(side))
+			b.add(q.Add(side))
+			b.add(q.Sub(side))
+			if opt.Dashed {
+				b.cap(p, p.Sub(q), opt.Cap)
+				b.cap(q, q.Sub(p), opt.Cap)
 			}
 		}
+
+		first, last := 1, n-1
+		if closed {
+			first, last = 0, n
+		}
+		for i := first; i < last; i++ {
+			b.join(pts[(i+n-1)%n], pts[i], pts[(i+1)%n], opt)
+		}
+		if !closed {
+			b.cap(pts[0], pts[0].Sub(pts[1]), opt.Cap)
+			b.cap(pts[n-1], pts[n-1].Sub(pts[n-2]), opt.Cap)
+		}
 	}
-	return bbox, seeded
+	return b.bbox, b.seeded
+}
+
+// strokeBounds accumulates the bounding box of the pieces a stroke is made
+// of.
+type strokeBounds struct {
+	half   float64 // half the line width
+	bbox   rect.Rect
+	seeded bool
+}
+
+func (b *strokeBounds) add(p vec.Vec2) {
+	if !b.seeded {
+		b.bbox = rect.Rect{LLx: p.X, LLy: p.Y, URx: p.X, URy: p.Y}
+		b.seeded = true
+		return
+	}
+	b.bbox.Add(p.X, p.Y)
+}
+
+// axes are the four directions in which a circular arc can reach an edge of
+// the bounding box somewhere between its two end points.
+var axes = [4]vec.Vec2{{X: 1}, {X: -1}, {Y: 1}, {Y: -1}}
+
+// disc adds the disc of half the line width around centre.
+func (b *strokeBounds) disc(centre vec.Vec2) {
+	for _, e := range axes {
+		b.add(centre.Add(e.Mul(b.half)))
+	}
+}
+
+// arc adds the arc of radius half the line width around centre which is
+// centred on the unit direction mid and reaches a half-angle to either side
+// of it, given by its cosine.  Only the points where the arc reaches furthest
+// along an axis are added: the arc's two end points are left to the caller.
+func (b *strokeBounds) arc(centre, mid vec.Vec2, cosHalfAngle float64) {
+	for _, e := range axes {
+		if e.Dot(mid) > cosHalfAngle {
+			b.add(centre.Add(e.Mul(b.half)))
+		}
+	}
+}
+
+// join adds the join at q of a stroke running from p to q to r, beyond the
+// corners of the two segments' rectangles.
+func (b *strokeBounds) join(p, q, r vec.Vec2, opt StrokeOptions) {
+	switch opt.Join {
+	case JoinMiter:
+		if tip, ok := miterTip(p, q, r, opt); ok {
+			b.add(tip)
+		}
+	case JoinRound:
+		// The join is the pie slice on the outer side of the corner,
+		// between the two segments' outer edges.  It is centred on the
+		// outer bisector, and spans the angle theta the direction turns by;
+		// half the sum of the unit directions has length cos(theta/2).
+		in, out := q.Sub(p).Normalize(), r.Sub(q).Normalize()
+		outer := in.Sub(out)
+		if outer == (vec.Vec2{}) {
+			return // straight on: no corner to fill
+		}
+		b.arc(q, outer.Normalize(), in.Add(out).Length()/2)
+	}
+}
+
+// cap adds the cap at the end point q of an open sub-path, pointing in
+// direction away, beyond the corners of the end segment's rectangle.
+func (b *strokeBounds) cap(q, away vec.Vec2, style CapStyle) {
+	d := away.Normalize()
+	switch style {
+	case CapSquare:
+		ext, side := d.Mul(b.half), d.Rot90().Mul(b.half)
+		b.add(q.Add(ext).Add(side))
+		b.add(q.Add(ext).Sub(side))
+	case CapRound:
+		b.arc(q, d, 0)
+	}
 }
 
 // miterTip returns the point the miter join at b reaches, for a stroke
@@ -174,8 +268,7 @@ func PolylineStrokeBBox(subpaths [][]vec.Vec2, closed bool, opt StrokeOptions) (
 //
 // ok is false where the corner is bevelled instead, and where the path runs
 // straight through b or doubles back on itself; in all of these the join
-// reaches no further from b than half the line width, which the caller has
-// allowed for already.
+// reaches no further than the corners of the two segments' rectangles.
 func miterTip(a, b, c vec.Vec2, opt StrokeOptions) (vec.Vec2, bool) {
 	in, out := b.Sub(a), c.Sub(b)
 	length, ok := linalg.MiterLength(in, out, opt.Width, opt.MiterLimit)
@@ -227,38 +320,4 @@ func distinctVertices(pts []vec.Vec2, closed bool) []vec.Vec2 {
 		out = out[:len(out)-1]
 	}
 	return out
-}
-
-// capDirection returns the direction the cap at the end vertex i of an open
-// sub-path points in: away from the vertex, along the segment which ends
-// there.  The vector is not normalised, and it is zero for a sub-path with
-// a single vertex, which has no direction to take.  pts must have no two
-// consecutive vertices coincide.
-func capDirection(pts []vec.Vec2, i int) vec.Vec2 {
-	if len(pts) < 2 {
-		return vec.Vec2{}
-	}
-	if i == 0 {
-		return pts[0].Sub(pts[1])
-	}
-	return pts[i].Sub(pts[i-1])
-}
-
-// squareCapReach returns how far a projecting square cap pointing in
-// direction away reaches from the end point, measured along either axis.
-// half is half the line width.
-//
-// The cap is a square of the line width with the end point in the middle of
-// one side, so its two far corners lie half the line width along the
-// direction and half of it to either side.  Measured along an axis that is
-// half the line width times the sum of the two components of the unit
-// direction, which comes to half the width for a cap along an axis and to
-// half the width times the square root of two for one at 45 degrees.
-func squareCapReach(away vec.Vec2, half float64) float64 {
-	length := away.Length()
-	if length == 0 {
-		// no direction to point the cap in: allow for the worst case
-		return half * math.Sqrt2
-	}
-	return half * (math.Abs(away.X) + math.Abs(away.Y)) / length
 }

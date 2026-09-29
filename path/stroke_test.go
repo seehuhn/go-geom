@@ -41,15 +41,81 @@ func checkBBox(t *testing.T, got rect.Rect, ok bool, want rect.Rect) {
 	}
 }
 
-// TestPolylineStrokeBBoxSegment checks the box round a single segment: half
-// the line width to either side of each end point.  That reaches half the
-// line width past the ends, where a butt cap in fact draws nothing.
+// TestPolylineStrokeBBoxSegment checks the box round a single segment with
+// butt caps: half the line width to either side, and nothing beyond the ends.
 func TestPolylineStrokeBBoxSegment(t *testing.T) {
 	pts := []vec.Vec2{{X: 0, Y: 0}, {X: 10, Y: 0}}
 	got, ok := PolylineStrokeBBox([][]vec.Vec2{pts}, false, StrokeOptions{
 		Width: 4, Join: JoinMiter, MiterLimit: DefaultMiterLimit,
 	})
-	checkBBox(t, got, ok, rect.Rect{LLx: -2, LLy: -2, URx: 12, URy: 2})
+	checkBBox(t, got, ok, rect.Rect{LLx: 0, LLy: -2, URx: 10, URy: 2})
+
+	// on a diagonal, the butt ends reach only to their corners
+	diagonal := []vec.Vec2{{X: 0, Y: 0}, {X: 10, Y: 10}}
+	got, ok = PolylineStrokeBBox([][]vec.Vec2{diagonal}, false, StrokeOptions{Width: 2})
+	r := math.Sqrt2 / 2
+	checkBBox(t, got, ok, rect.Rect{LLx: -r, LLy: -r, URx: 10 + r, URy: 10 + r})
+}
+
+// TestPolylineStrokeBBoxRoundCap checks that a round cap reaches half the
+// line width beyond the end point, in the directions the cap faces.
+func TestPolylineStrokeBBoxRoundCap(t *testing.T) {
+	opt := StrokeOptions{Width: 2, Cap: CapRound}
+
+	flat := []vec.Vec2{{X: 0, Y: 0}, {X: 10, Y: 0}}
+	got, ok := PolylineStrokeBBox([][]vec.Vec2{flat}, false, opt)
+	checkBBox(t, got, ok, rect.Rect{LLx: -1, LLy: -1, URx: 11, URy: 1})
+
+	diagonal := []vec.Vec2{{X: 0, Y: 0}, {X: 10, Y: 10}}
+	got, ok = PolylineStrokeBBox([][]vec.Vec2{diagonal}, false, opt)
+	checkBBox(t, got, ok, rect.Rect{LLx: -1, LLy: -1, URx: 11, URy: 11})
+}
+
+// TestPolylineStrokeBBoxShortEndSegment checks a square cap on an end segment
+// shorter than half the line width.  The cap reaches out from the end point
+// only, and not back past the segment's other end, where the stroke is
+// bounded by the vertical segment before it.
+func TestPolylineStrokeBBoxShortEndSegment(t *testing.T) {
+	const lw = 20
+	pts := []vec.Vec2{{X: 0, Y: -100}, {X: 0, Y: 0}, {X: -math.Sqrt2 / 2, Y: math.Sqrt2 / 2}}
+	got, ok := PolylineStrokeBBox([][]vec.Vec2{pts}, false, StrokeOptions{
+		Width: lw, Cap: CapSquare, Join: JoinMiter, MiterLimit: DefaultMiterLimit,
+	})
+	if !ok {
+		t.Fatal("no bounding box")
+	}
+	if want := lw / 2.0; math.Abs(got.URx-want) > 1e-9 {
+		t.Errorf("bbox ends at x = %g, want %g", got.URx, want)
+	}
+}
+
+// TestPolylineStrokeBBoxRoundJoin checks that a round join reaches half the
+// line width beyond the vertex on the outer side of the corner, and only
+// there.
+func TestPolylineStrokeBBoxRoundJoin(t *testing.T) {
+	// a sharp turn at (10, 0), with the outer side facing the positive x
+	// axis, the lower right, and the upper right respectively
+	opt := StrokeOptions{Width: 2, Join: JoinRound}
+	for _, tc := range []struct {
+		pts  []vec.Vec2
+		want rect.Rect
+	}{
+		{
+			pts:  []vec.Vec2{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 0, Y: 1}},
+			want: rect.Rect{LLx: -1 / math.Hypot(10, 1), LLy: -1, URx: 11, URy: 1 + 10/math.Hypot(10, 1)},
+		},
+		{
+			pts:  []vec.Vec2{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}},
+			want: rect.Rect{LLx: 0, LLy: -1, URx: 11, URy: 10},
+		},
+		{
+			pts:  []vec.Vec2{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: -10}},
+			want: rect.Rect{LLx: 0, LLy: -10, URx: 11, URy: 1},
+		},
+	} {
+		got, ok := PolylineStrokeBBox([][]vec.Vec2{tc.pts}, false, opt)
+		checkBBox(t, got, ok, tc.want)
+	}
 }
 
 // TestPolylineStrokeBBoxSquareCap checks the extra reach of a projecting
@@ -126,6 +192,13 @@ func spikeTipX(lw float64) float64 {
 	return -lw / 2 / math.Sin(math.Atan2(spikeHalfWidth, 100))
 }
 
+// spikeCornerX is how far the outer corners of the two segments meeting at
+// the sharp corner of [spikeTriangle] reach along the negative x axis, for a
+// stroke of width lw.
+func spikeCornerX(lw float64) float64 {
+	return -lw / 2 * spikeHalfWidth / math.Hypot(100, spikeHalfWidth)
+}
+
 // TestPolylineStrokeBBoxMiter checks that a miter join is allowed for where
 // it reaches beyond the line width, that a round join is not, and that a
 // corner too sharp for the miter limit is bevelled.
@@ -150,12 +223,12 @@ func TestPolylineStrokeBBoxMiter(t *testing.T) {
 	}
 
 	// a limit too short for any miter leaves the bevelled corner, which
-	// reaches no further than a round one
+	// reaches only to the outer corners of the two segments
 	bevelled, _ := PolylineStrokeBBox([][]vec.Vec2{spikeTriangle}, true, StrokeOptions{
 		Width: lw, Join: JoinMiter, MiterLimit: 1,
 	})
-	if bevelled != round {
-		t.Errorf("bevelled bbox = %v, want the round one %v", bevelled, round)
+	if want := spikeCornerX(lw); math.Abs(bevelled.LLx-want) > 1e-9 {
+		t.Errorf("a bevelled join starts at x = %g, want %g", bevelled.LLx, want)
 	}
 }
 
@@ -178,15 +251,57 @@ func TestPolylineStrokeBBoxDefaultMiterLimit(t *testing.T) {
 	}
 }
 
+// TestPolylineStrokeBBoxDashed checks that a dashed stroke is allowed the
+// caps of a dash ending or starting on a corner.  At the bevelled sharp corner
+// of [spikeTriangle], a square cap pointing along either segment reaches
+// further than the bevel, and a round cap reaches half the line width.
+func TestPolylineStrokeBBoxDashed(t *testing.T) {
+	const lw = 4
+	h := lw / 2.0
+	hyp := math.Hypot(100, spikeHalfWidth)
+	for _, tc := range []struct {
+		cap  CapStyle
+		want float64
+	}{
+		{CapButt, spikeCornerX(lw)},
+		{CapSquare, -h * (100 + spikeHalfWidth) / hyp},
+		{CapRound, -h},
+	} {
+		opt := StrokeOptions{Width: lw, Cap: tc.cap, Join: JoinBevel}
+		undashed, ok := PolylineStrokeBBox([][]vec.Vec2{spikeTriangle}, true, opt)
+		if !ok {
+			t.Fatal("no bounding box")
+		}
+		opt.Dashed = true
+		dashed, _ := PolylineStrokeBBox([][]vec.Vec2{spikeTriangle}, true, opt)
+		if math.Abs(dashed.LLx-tc.want) > 1e-9 {
+			t.Errorf("%v caps: dashed bbox starts at x = %g, want %g", tc.cap, dashed.LLx, tc.want)
+		}
+		if !dashed.Covers(undashed) {
+			t.Errorf("%v caps: dashed bbox %v does not cover the undashed %v", tc.cap, dashed, undashed)
+		}
+	}
+
+	// a zero-length line draws nothing without round caps, dashed or not
+	p := vec.Vec2{X: 1, Y: 2}
+	if _, ok := PolylineStrokeBBox([][]vec.Vec2{{p, p}}, false, StrokeOptions{
+		Width: lw, Cap: CapSquare, Dashed: true,
+	}); ok {
+		t.Error("a dashed zero-length line reported a bounding box")
+	}
+}
+
 // TestPolylineStrokeBBoxStraightVertex checks a vertex the stroke runs
-// straight through: there is no corner there for a miter to reach beyond, so
-// the stroke stays within half the line width of the path.
+// straight through: there is no corner there for a join to fill, so the
+// stroke is the rectangle along the whole path.
 func TestPolylineStrokeBBoxStraightVertex(t *testing.T) {
 	pts := []vec.Vec2{{X: 0, Y: 0}, {X: 3, Y: 4}, {X: 6, Y: 8}}
-	got, ok := PolylineStrokeBBox([][]vec.Vec2{pts}, false, StrokeOptions{
-		Width: 2, Join: JoinMiter, MiterLimit: DefaultMiterLimit,
-	})
-	checkBBox(t, got, ok, rect.Rect{LLx: -1, LLy: -1, URx: 7, URy: 9})
+	for _, join := range []JoinStyle{JoinMiter, JoinRound, JoinBevel} {
+		got, ok := PolylineStrokeBBox([][]vec.Vec2{pts}, false, StrokeOptions{
+			Width: 2, Join: join, MiterLimit: DefaultMiterLimit,
+		})
+		checkBBox(t, got, ok, rect.Rect{LLx: -0.8, LLy: -0.6, URx: 6.8, URy: 8.6})
+	}
 }
 
 // TestPolylineStrokeBBoxMiterIsExact checks that a miter join is taken in as
@@ -216,16 +331,17 @@ func TestPolylineStrokeBBoxOpenPathEnds(t *testing.T) {
 	if !ok {
 		t.Fatal("no bounding box")
 	}
-	if want := -lw / 2.0; math.Abs(open.LLx-want) > 1e-9 {
+	if want := spikeCornerX(lw); math.Abs(open.LLx-want) > 1e-9 {
 		t.Errorf("bbox starts at x = %g, want %g: an end point carries no join",
 			open.LLx, want)
 	}
 }
 
 // TestPolylineStrokeBBoxDegenerate checks the paths which have no direction
-// to work from: no vertices at all, and a sub-path whose vertices coincide.
+// to work from: no vertices at all, and zero-length lines, which only round
+// caps draw.
 func TestPolylineStrokeBBoxDegenerate(t *testing.T) {
-	opt := StrokeOptions{Width: 2, Cap: CapSquare, Join: JoinMiter, MiterLimit: DefaultMiterLimit}
+	opt := StrokeOptions{Width: 2, Join: JoinMiter, MiterLimit: DefaultMiterLimit}
 
 	if _, ok := PolylineStrokeBBox(nil, false, opt); ok {
 		t.Error("an empty path reported a bounding box")
@@ -234,14 +350,31 @@ func TestPolylineStrokeBBoxDegenerate(t *testing.T) {
 		t.Error("a sub-path with no vertices reported a bounding box")
 	}
 
-	// a single point, and a pair on top of each other: the cap can point
-	// anywhere, so the box allows for the worst case
-	r := math.Sqrt2
-	want := rect.Rect{LLx: -r, LLy: -r, URx: r, URy: r}
-	got, ok := PolylineStrokeBBox([][]vec.Vec2{{{X: 0, Y: 0}}}, false, opt)
-	checkBBox(t, got, ok, want)
-	got, ok = PolylineStrokeBBox([][]vec.Vec2{{{X: 0, Y: 0}, {X: 0, Y: 0}}}, false, opt)
-	checkBBox(t, got, ok, want)
+	p := vec.Vec2{X: 5, Y: 7}
+	zeroLength := [][][]vec.Vec2{{{p}}, {{p, p}}}
+	for _, closed := range []bool{false, true} {
+		for _, subpaths := range zeroLength {
+			for _, lineCap := range []CapStyle{CapButt, CapSquare} {
+				opt.Cap = lineCap
+				if got, ok := PolylineStrokeBBox(subpaths, closed, opt); ok {
+					t.Errorf("zero-length line %v, closed=%v, with %v caps: bbox %v, want none",
+						subpaths, closed, lineCap, got)
+				}
+			}
+
+			opt.Cap = CapRound
+			got, ok := PolylineStrokeBBox(subpaths, closed, opt)
+			checkBBox(t, got, ok, rect.Rect{LLx: 4, LLy: 6, URx: 6, URy: 8})
+		}
+	}
+
+	// a zero-length line beside a drawn one adds nothing without round caps
+	opt.Cap = CapSquare
+	got, ok := PolylineStrokeBBox([][]vec.Vec2{
+		{{X: 0, Y: 0}, {X: 10, Y: 0}},
+		{p, p},
+	}, false, opt)
+	checkBBox(t, got, ok, rect.Rect{LLx: -1, LLy: -1, URx: 11, URy: 1})
 
 	// a zero-length first segment still leaves a direction to cap along
 	got, ok = PolylineStrokeBBox([][]vec.Vec2{
@@ -336,7 +469,7 @@ func TestPolylineStrokeBBoxSubpaths(t *testing.T) {
 		{{X: 0, Y: 0}, {X: 10, Y: 0}},
 		{{X: 20, Y: 20}, {X: 30, Y: 20}},
 	}, false, StrokeOptions{Width: 2, Join: JoinRound})
-	checkBBox(t, got, ok, rect.Rect{LLx: -1, LLy: -1, URx: 31, URy: 21})
+	checkBBox(t, got, ok, rect.Rect{LLx: 0, LLy: -1, URx: 30, URy: 21})
 }
 
 // TestCapStyleString and TestJoinStyleString check the names of the styles.
