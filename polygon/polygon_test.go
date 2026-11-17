@@ -103,8 +103,6 @@ func TestResampleDegenerate(t *testing.T) {
 	testCases := []testCase{
 		{"nil", nil, 4},
 		{"single vertex", []vec.Vec2{{X: 1, Y: 2}}, 4},
-		{"zero count", unitSquare, 0},
-		{"negative count", unitSquare, -1},
 		{"zero perimeter", []vec.Vec2{{}, {}, {}}, 4},
 	}
 	for _, tc := range testCases {

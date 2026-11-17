@@ -56,13 +56,13 @@ func SignedArea(vertices []vec.Vec2) float64 {
 // by n, so that the step from the last point back to the first matches the
 // others.
 //
-// The result is nil if n is not positive, or if the polygon has fewer than two
-// vertices or a perimeter which is not positive.  Two vertices are enough: the
-// boundary then runs out along the single edge and back again, as it does for
-// [Perimeter].
+// The argument n must be positive.  The result is nil if the polygon has fewer
+// than two vertices or a perimeter which is not positive.  Two vertices are
+// enough: the boundary then runs out along the single edge and back again, as
+// it does for [Perimeter].
 func Resample(vertices []vec.Vec2, n int) []vec.Vec2 {
 	m := len(vertices)
-	if m < 2 || n < 1 {
+	if m < 2 {
 		return nil
 	}
 

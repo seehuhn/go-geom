@@ -155,9 +155,7 @@ func (M Matrix) SingularValues() (sigmaMin, sigmaMax float64) {
 // Inv computes the inverse of the transformation matrix M.  ok is false if M
 // is singular, if any of its elements is infinite or not a number, or if its
 // inverse overflows the range of float64.  The returned matrix is then Zero,
-// which collapses every point onto the origin, so that a caller which ignores
-// ok produces visibly degenerate output rather than plausible nonsense.  Zero
-// is never returned with ok true.
+// which is never returned with ok true.
 //
 // An inverse which is merely inaccurate is still returned with ok true.
 // Whether to use it is left to the caller, which alone knows what the result
