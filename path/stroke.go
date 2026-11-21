@@ -94,6 +94,8 @@ type StrokeOptions struct {
 	// as a multiple of the line width; see [linalg.MiterLength] for how the
 	// two are compared.  Zero stands for [DefaultMiterLimit], since a limit
 	// below one is shorter than any miter and would bevel every corner.
+	// An infinite limit gives a miter at every corner except where the path
+	// doubles back.
 	MiterLimit float64
 
 	// Dashed says that the stroke is drawn with a dash pattern.  Every dash
@@ -115,6 +117,9 @@ type StrokeOptions struct {
 //
 // With opt.Dashed set, the rectangle is the smallest one containing the
 // stroke for every dash pattern and phase.
+//
+// The rectangle grows with the stroke options as described for
+// [Path.StrokeBBox].
 //
 // The second result is false where the stroke draws nothing, in which case
 // there is nothing to bound.
@@ -158,6 +163,21 @@ func PolylineStrokeBBox(subpaths [][]vec.Vec2, closed bool, opt StrokeOptions) (
 //
 // With opt.Dashed set, the rectangle contains the stroke for every dash
 // pattern and phase.
+//
+// Changing one option in any of the following ways, with the others kept,
+// gives a rectangle which covers the original one: setting opt.Dashed,
+// raising the miter limit, replacing bevel joins with miter joins, and
+// replacing butt caps with square or round caps.  For the miter limit, zero
+// counts as [DefaultMiterLimit].  Where the dash pattern, join style, miter
+// limit or cap style is not known, the stroke for every value they can take
+// thus lies in the union of four rectangles: miter joins with an infinite
+// miter limit or round joins, combined with square or round caps, all with
+// opt.Dashed set.
+//
+// With miter joins and an infinite miter limit, a path with curves can give
+// a rectangle of infinite extent.  A renderer which flattens a curve near a
+// cusp joins pieces which turn by nearly half a turn, and there is no bound
+// on the length of the miters at such corners.
 //
 // The second result is false where the stroke draws nothing, in which case
 // there is nothing to bound.

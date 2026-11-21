@@ -615,3 +615,99 @@ func TestStrokeBBoxFlattened(t *testing.T) {
 		}
 	}
 }
+
+// TestStrokeBBoxWorstCase checks the orderings between stroke options which
+// let a caller bound a stroke whose options are not known.
+func TestStrokeBBoxWorstCase(t *testing.T) {
+	r := rand.New(rand.NewPCG(3, 4))
+	point := func() vec.Vec2 {
+		return vec.Vec2{X: r.Float64()*20 - 10, Y: r.Float64()*20 - 10}
+	}
+	randomOptions := func() StrokeOptions {
+		return StrokeOptions{
+			Width:      0.1 + 3*r.Float64(),
+			Cap:        CapStyle(r.IntN(3)),
+			Join:       JoinStyle(r.IntN(3)),
+			MiterLimit: 1 + 20*r.Float64(),
+		}
+	}
+	for range 2000 {
+		p := &Data{}
+		var polylines [][]vec.Vec2
+		for range 1 + r.IntN(2) {
+			cur := point()
+			p.MoveTo(cur)
+			pts := []vec.Vec2{cur}
+			for range 1 + r.IntN(4) {
+				switch r.IntN(3) {
+				case 0:
+					cur = point()
+					p.LineTo(cur)
+				case 1:
+					c := Cubic{cur, point(), point(), point()}
+					p.CubeTo(c[1], c[2], c[3])
+					cur = c[3]
+				default:
+					p.LineTo(cur) // a segment of length zero
+				}
+				pts = append(pts, cur)
+			}
+			if r.IntN(2) == 0 {
+				p.Close()
+			}
+			polylines = append(polylines, pts)
+		}
+		closed := r.IntN(2) == 0
+
+		checkWorstCase(t, "StrokeBBox", p.Iter().StrokeBBox, randomOptions())
+		checkWorstCase(t, "PolylineStrokeBBox", func(opt StrokeOptions) (rect.Rect, bool) {
+			return PolylineStrokeBBox(polylines, closed, opt)
+		}, randomOptions())
+	}
+}
+
+// checkWorstCase checks that each documented change of the stroke options
+// gives a rectangle covering the one for opt.
+func checkWorstCase(t *testing.T, name string, bbox func(StrokeOptions) (rect.Rect, bool), opt StrokeOptions) {
+	t.Helper()
+	base, ok := bbox(opt)
+	if !ok {
+		return
+	}
+	covers := func(what string, wider StrokeOptions, want rect.Rect) rect.Rect {
+		got, ok := bbox(wider)
+		if !ok {
+			t.Fatalf("%s %+v: %s draws nothing", name, opt, what)
+		}
+		if !got.Grow(1e-9).Covers(want) {
+			t.Fatalf("%s %+v: %s bbox %v does not cover %v", name, opt, what, got, want)
+		}
+		return got
+	}
+
+	dashed := opt
+	dashed.Dashed = true
+	covers("dashed", dashed, base)
+
+	if opt.Join != JoinRound {
+		// a limit above any in randomOptions keeps curved strokes finite
+		miter := opt
+		miter.Join = JoinMiter
+		miter.MiterLimit = 1e3
+		limited := covers("miter with limit 1e3", miter, base)
+
+		miter.MiterLimit = math.Inf(1)
+		covers("miter without limit", miter, limited)
+	}
+
+	if opt.Cap == CapButt {
+		round := opt
+		round.Cap = CapRound
+		covers("round cap", round, base)
+	}
+	if opt.Cap != CapRound {
+		square := opt
+		square.Cap = CapSquare
+		covers("square cap", square, base)
+	}
+}
