@@ -27,13 +27,65 @@ func TestEmpty(t *testing.T) {
 	}
 }
 
+type bboxCase struct {
+	name string
+	p    *Data
+	want rect.Rect
+}
+
+// straightBBoxCases are paths without curves, for which [Path.BBox] and
+// [Path.TightBBox] agree.
+var straightBBoxCases = []bboxCase{
+	{
+		// a trailing move draws nothing
+		"trailing move",
+		(&Data{}).MoveTo(vec.Vec2{X: 1, Y: 2}).LineTo(vec.Vec2{X: 3, Y: -1}).MoveTo(vec.Vec2{X: -5, Y: 7}),
+		rect.Rect{LLx: 1, LLy: -1, URx: 3, URy: 2},
+	},
+	{
+		"move after close",
+		(&Data{}).MoveTo(vec.Vec2{X: 1, Y: 2}).LineTo(vec.Vec2{X: 3, Y: -1}).Close().MoveTo(vec.Vec2{X: -5, Y: 7}),
+		rect.Rect{LLx: 1, LLy: -1, URx: 3, URy: 2},
+	},
+	{
+		// a move followed by a move draws nothing
+		"move after move",
+		(&Data{}).MoveTo(vec.Vec2{X: -5, Y: 7}).MoveTo(vec.Vec2{X: 1, Y: 2}).LineTo(vec.Vec2{X: 3, Y: -1}),
+		rect.Rect{LLx: 1, LLy: -1, URx: 3, URy: 2},
+	},
+	{
+		// a closed single-point sub-path is a zero-length segment
+		"move and close",
+		(&Data{}).MoveTo(vec.Vec2{X: 1, Y: 2}).LineTo(vec.Vec2{X: 3, Y: -1}).
+			MoveTo(vec.Vec2{X: -5, Y: 7}).Close(),
+		rect.Rect{LLx: -5, LLy: -1, URx: 3, URy: 7},
+	},
+	{
+		// the current point starts at the origin
+		"line without a move",
+		(&Data{}).LineTo(vec.Vec2{X: 5, Y: 5}),
+		rect.Rect{URx: 5, URy: 5},
+	},
+	{
+		// a close with no open sub-path does nothing
+		"close without a move",
+		(&Data{}).Close().LineTo(vec.Vec2{X: -3, Y: 1}),
+		rect.Rect{LLx: -3, URy: 1},
+	},
+}
+
+// emptyPaths are paths without segments, which neither [Path.BBox] nor
+// [Path.TightBBox] can bound.
+var emptyPaths = []Path{
+	Empty,
+	(&Data{}).Close().Iter(),
+	(&Data{}).MoveTo(vec.Vec2{X: 1, Y: 2}).Iter(),
+	(&Data{}).MoveTo(vec.Vec2{X: 1, Y: 2}).MoveTo(vec.Vec2{X: 3, Y: 4}).Iter(),
+}
+
 func TestTightBBox(t *testing.T) {
 	big := math.Ldexp(1, 600)
-	cases := []struct {
-		name string
-		p    *Data
-		want rect.Rect
-	}{
+	cases := append([]bboxCase{
 		{
 			"quadratic",
 			(&Data{}).MoveTo(vec.Vec2{}).QuadTo(vec.Vec2{X: 50, Y: 100}, vec.Vec2{X: 100}),
@@ -45,11 +97,6 @@ func TestTightBBox(t *testing.T) {
 			rect.Rect{URx: 50, URy: 30},
 		},
 		{
-			"lines and a lone move",
-			(&Data{}).MoveTo(vec.Vec2{X: 1, Y: 2}).LineTo(vec.Vec2{X: 3, Y: -1}).Close().MoveTo(vec.Vec2{X: -5, Y: 7}),
-			rect.Rect{LLx: -5, LLy: -1, URx: 3, URy: 7},
-		},
-		{
 			// the curve starts where the closed sub-path started
 			"curve after close",
 			(&Data{}).MoveTo(vec.Vec2{}).LineTo(vec.Vec2{X: 10, Y: 10}).Close().
@@ -57,20 +104,9 @@ func TestTightBBox(t *testing.T) {
 			rect.Rect{URx: 15, URy: 10},
 		},
 		{
-			// the current point starts at the origin
-			"line without a move",
-			(&Data{}).LineTo(vec.Vec2{X: 5, Y: 5}),
-			rect.Rect{URx: 5, URy: 5},
-		},
-		{
 			"curve without a move",
 			(&Data{}).QuadTo(vec.Vec2{X: 2, Y: 4}, vec.Vec2{X: 4}),
 			rect.Rect{URx: 4, URy: 2},
-		},
-		{
-			"close without a move",
-			(&Data{}).Close().LineTo(vec.Vec2{X: -3, Y: 1}),
-			rect.Rect{LLx: -3, URy: 1},
 		},
 		{
 			"huge",
@@ -83,7 +119,7 @@ func TestTightBBox(t *testing.T) {
 				QuadTo(vec.Vec2{X: math.MaxFloat64}, vec.Vec2{X: -math.MaxFloat64}),
 			rect.Rect{LLx: -math.MaxFloat64},
 		},
-	}
+	}, straightBBoxCases...)
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			got, ok := c.p.Iter().TightBBox()
@@ -108,14 +144,6 @@ func TestToCubicWithoutMove(t *testing.T) {
 	}
 	if n != 1 {
 		t.Errorf("got %d segments, want 1", n)
-	}
-}
-
-func TestTightBBoxEmpty(t *testing.T) {
-	for _, p := range []Path{Empty, (&Data{}).Close().Iter()} {
-		if _, ok := p.TightBBox(); ok {
-			t.Error("a path without points has a box")
-		}
 	}
 }
 
@@ -176,18 +204,10 @@ func TestTransformWithoutMove(t *testing.T) {
 	}
 }
 
-// TestBBoxWithoutMove checks that the bounding box of a path which begins
-// with a drawing command contains the origin, where the path starts.
-func TestBBoxWithoutMove(t *testing.T) {
-	cases := []struct {
-		name string
-		p    *Data
-		want rect.Rect
-	}{
-		{"line", (&Data{}).LineTo(vec.Vec2{X: 5, Y: 5}), rect.Rect{URx: 5, URy: 5}},
-		{"close first", (&Data{}).Close().LineTo(vec.Vec2{X: -3, Y: 1}), rect.Rect{LLx: -3, URy: 1}},
-	}
-	for _, c := range cases {
+// TestBBoxStraight checks BBox on paths without curves, including those with
+// moves which start no segment and those which begin without a move.
+func TestBBoxStraight(t *testing.T) {
+	for _, c := range straightBBoxCases {
 		t.Run(c.name, func(t *testing.T) {
 			if got, ok := c.p.Iter().BBox(); !ok || got != c.want {
 				t.Errorf("got %v, %t, want %v, true", got, ok, c.want)
@@ -241,10 +261,13 @@ func TestBBoxWithCurves(t *testing.T) {
 	}
 }
 
-func TestBBoxEmpty(t *testing.T) {
-	for _, p := range []Path{Empty, (&Data{}).Close().Iter()} {
-		if _, ok := p.BBox(); ok {
-			t.Error("a path without points has a box")
+func TestEmptyBBox(t *testing.T) {
+	for _, p := range emptyPaths {
+		if got, ok := p.BBox(); ok || !got.IsZero() {
+			t.Errorf("BBox of a path without segments: %v, %t", got, ok)
+		}
+		if got, ok := p.TightBBox(); ok || !got.IsZero() {
+			t.Errorf("TightBBox of a path without segments: %v, %t", got, ok)
 		}
 	}
 }

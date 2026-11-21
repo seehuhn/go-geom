@@ -48,7 +48,8 @@ func (c Command) NumPoints() int {
 // A drawing command which follows a CmdClose without an intervening CmdMoveTo
 // therefore starts a new sub-path at that point.  This matches the closepath
 // operator of the PostScript language and the "h" operator of PDF content
-// streams.
+// streams.  A CmdClose with no open sub-path, at the start of the path or
+// directly after another CmdClose, does nothing.
 //
 // Before the first CmdMoveTo, the current point is the origin, and so is the
 // start of the current sub-path.  A path which begins with a drawing command
@@ -125,30 +126,34 @@ func (p Path) ToCubic() Path {
 // TightBBox returns the smallest axis-aligned rectangle which contains the
 // path.  Unlike [Path.BBox], it bounds curves by the points they pass
 // through, not by their control points.  The rectangle contains every
-// segment of the path and the start point of every sub-path, including a
-// sub-path which consists of a single CmdMoveTo.  It is exact up to rounding,
-// as described for [Cubic.BBox].
+// segment of the path, including the zero-length segment of a sub-path which
+// consists of a CmdMoveTo and a CmdClose.  A CmdMoveTo which starts no
+// segment, because another CmdMoveTo or the end of the path follows it,
+// draws nothing and is ignored.  The result is exact up to rounding, as
+// described for [Cubic.BBox].
 //
-// The second result is false for a path without points, in which case there
-// is nothing to bound.
+// The second result is false for a path without segments, in which case
+// there is nothing to bound and the rectangle is zero.
 func (p Path) TightBBox() (rect.Rect, bool) {
 	var bbox rect.Rect
 	first := true
 	var cur, start vec.Vec2
+	var pending bool // start is from a CmdMoveTo, not yet in bbox
 	for cmd, pts := range p {
-		if cmd == CmdClose {
-			cur = start
+		if cmd == CmdMoveTo {
+			cur, start = pts[0], pts[0]
+			pending = true
 			continue
 		}
-		if first {
-			q := firstPoint(cmd, pts)
-			bbox = rect.Rect{LLx: q.X, LLy: q.Y, URx: q.X, URy: q.Y}
-			first = false
+		// a sub-path before the first CmdMoveTo starts at the origin
+		if pending || first && cmd != CmdClose {
+			extendBox(&bbox, first, start)
+			first, pending = false, false
 		}
 		switch cmd {
-		case CmdMoveTo:
-			start = pts[0]
-			bbox.Add(start.X, start.Y)
+		case CmdClose:
+			cur = start
+			continue
 		case CmdLineTo:
 			bbox.Add(pts[0].X, pts[0].Y)
 		case CmdQuadTo:
@@ -197,21 +202,26 @@ func quadExtremum(a0, a1, a2 float64) float64 {
 
 // BBox returns the smallest axis-aligned rectangle which contains all points
 // of the path, counting the control points of curves.  The rectangle contains
-// the path, but can be larger than [Path.TightBBox].
+// the path, but can be larger than [Path.TightBBox].  As for TightBBox, a
+// CmdMoveTo which starts no segment is ignored.
 //
-// The second result is false for a path without points, in which case there
-// is nothing to bound.
+// The second result is false for a path without segments, in which case
+// there is nothing to bound and the rectangle is zero.
 func (p Path) BBox() (rect.Rect, bool) {
 	var bbox rect.Rect
 	first := true
+	var start vec.Vec2
+	var pending bool // start is from a CmdMoveTo, not yet in bbox
 	for cmd, pts := range p {
-		if cmd == CmdClose {
+		if cmd == CmdMoveTo {
+			start = pts[0]
+			pending = true
 			continue
 		}
-		if first {
-			q := firstPoint(cmd, pts)
-			bbox = rect.Rect{LLx: q.X, LLy: q.Y, URx: q.X, URy: q.Y}
-			first = false
+		// a sub-path before the first CmdMoveTo starts at the origin
+		if pending || first && cmd != CmdClose {
+			extendBox(&bbox, first, start)
+			first, pending = false, false
 		}
 		for _, pt := range pts {
 			bbox.Add(pt.X, pt.Y)
@@ -220,12 +230,12 @@ func (p Path) BBox() (rect.Rect, bool) {
 	return bbox, !first
 }
 
-// firstPoint returns the start of a path whose first command other than
-// CmdClose is cmd, with points pts.  A drawing command starts at the
-// origin, the current point before the first CmdMoveTo.
-func firstPoint(cmd Command, pts []vec.Vec2) vec.Vec2 {
-	if cmd == CmdMoveTo {
-		return pts[0]
+// extendBox enlarges bbox to contain q.  If first is true, bbox is replaced
+// by the rectangle consisting of q alone.
+func extendBox(bbox *rect.Rect, first bool, q vec.Vec2) {
+	if first {
+		*bbox = rect.Rect{LLx: q.X, LLy: q.Y, URx: q.X, URy: q.Y}
+		return
 	}
-	return vec.Vec2{}
+	bbox.Add(q.X, q.Y)
 }

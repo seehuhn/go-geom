@@ -76,10 +76,7 @@ func TestCubicAtConvexHull(t *testing.T) {
 	c2 := vec.Vec2{X: 2, Y: -50}
 	p3 := vec.Vec2{X: 3, Y: 1}
 
-	bbox, _ := DataFromPath(func(yield func(Command, []vec.Vec2) bool) {
-		yield(CmdMoveTo, []vec.Vec2{p0})
-		yield(CmdCubeTo, []vec.Vec2{c1, c2, p3})
-	}).Iter().BBox()
+	bbox, _ := (&Data{}).MoveTo(p0).CubeTo(c1, c2, p3).Iter().BBox()
 
 	for i := range 101 {
 		u := float64(i) / 100
