@@ -20,6 +20,16 @@ func (r Rect) IsZero() bool {
 	return r.LLx == 0 && r.LLy == 0 && r.URx == 0 && r.URy == 0
 }
 
+// IsFinite reports whether all four coordinates of the rectangle are finite
+// numbers, neither infinite nor NaN.
+func (r Rect) IsFinite() bool {
+	return isFinite(r.LLx) && isFinite(r.LLy) && isFinite(r.URx) && isFinite(r.URy)
+}
+
+func isFinite(x float64) bool {
+	return !math.IsInf(x, 0) && !math.IsNaN(x)
+}
+
 // Dx returns the width of the rectangle.
 func (r Rect) Dx() float64 {
 	return r.URx - r.LLx

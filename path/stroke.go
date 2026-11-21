@@ -175,9 +175,17 @@ func PolylineStrokeBBox(subpaths [][]vec.Vec2, closed bool, opt StrokeOptions) (
 // opt.Dashed set.
 //
 // With miter joins and an infinite miter limit, a path with curves can give
-// a rectangle of infinite extent.  A renderer which flattens a curve near a
-// cusp joins pieces which turn by nearly half a turn, and there is no bound
-// on the length of the miters at such corners.
+// a rectangle of infinite extent.  A renderer which flattens a curve joins
+// chords between points of the curve, and where two consecutive chords
+// point in nearly opposite directions, there is no bound on the length of
+// the miter at the corner between them.  The rectangle is infinite only
+// where the control points allow this.  Within a curve, this is where the
+// legs of its control polygon span half a turn or more, as near a cusp.
+// Where two segments meet at a point q, it is where the vectors to q from
+// the other control points of the first segment span half a turn or more,
+// where the vectors from q to the other control points of the second
+// segment do, or where a combination with non-negative weights of the
+// former points opposite to such a combination of the latter.
 //
 // The second result is false where the stroke draws nothing, in which case
 // there is nothing to bound.
@@ -225,18 +233,41 @@ func (p Path) StrokeBBox(opt StrokeOptions) (rect.Rect, bool) {
 
 // strokeSeg is one segment of a stroked sub-path: a cubic Bezier curve, or
 // a straight line from c[0] to c[3], with c[1] = c[0] and c[2] = c[3].
+//
+// The directions of the chords between two points of the segment lie in a
+// range of width spread.  The range start holds the directions of the
+// chords which start at c[0], and end those of the chords which end at c[3].
 type strokeSeg struct {
-	c     Cubic
-	curve bool
-	turn  float64 // the curve's turning, as given by [controlTurning]
+	c          Cubic
+	curve      bool
+	spread     float64
+	start, end dirRange
 }
 
 func lineSeg(p, q vec.Vec2) strokeSeg {
-	return strokeSeg{c: Cubic{p, p, q, q}}
+	r := directionRange([3]vec.Vec2{q.Sub(p)})
+	return strokeSeg{c: Cubic{p, p, q, q}, start: r, end: r}
 }
 
+// curveSeg returns the segment for the curve c.
+//
+// The derivative of the curve is a combination with non-negative weights of
+// the legs of the control polygon, and so is every chord, the integral of
+// the derivative between its end points.  A point of the curve is a
+// combination of the control points with non-negative weights which sum to
+// one.  A chord starting at c[0] is thus a combination with non-negative
+// weights of the vectors from c[0] to the other control points, and a chord
+// ending at c[3] is one of the vectors from the other control points to
+// c[3].
 func curveSeg(c Cubic) strokeSeg {
-	return strokeSeg{c: c, curve: true, turn: controlTurning(c)}
+	_, lo, hi := relativeAngles([3]vec.Vec2{c[1].Sub(c[0]), c[2].Sub(c[1]), c[3].Sub(c[2])})
+	return strokeSeg{
+		c:      c,
+		curve:  true,
+		spread: hi - lo,
+		start:  directionRange([3]vec.Vec2{c[1].Sub(c[0]), c[2].Sub(c[0]), c[3].Sub(c[0])}),
+		end:    directionRange([3]vec.Vec2{c[3].Sub(c[0]), c[3].Sub(c[1]), c[3].Sub(c[2])}),
+	}
 }
 
 // startDir returns the direction in which the segment leaves its start
@@ -261,23 +292,53 @@ func (s strokeSeg) endDir() vec.Vec2 {
 	return s.c[3].Sub(s.c[0])
 }
 
-// controlTurning returns the total angle by which the control polygon of c
-// turns.  This bounds the turning of the curve, and of every polyline
-// inscribed in it.
-func controlTurning(c Cubic) float64 {
-	var total float64
-	var prev vec.Vec2
-	for i := 1; i < 4; i++ {
-		d := c[i].Sub(c[i-1])
+// dirRange is the range of directions at angles from base+lo to base+hi,
+// with lo <= hi, measured counterclockwise from the positive x axis.  A
+// range of half a turn or more gives no bound on the direction.
+//
+// The offsets lo and hi are kept apart from base, so that the width of the
+// range is free from the rounding of the additions.
+type dirRange struct {
+	base, lo, hi float64
+}
+
+// width returns the angle the range spans.
+func (r dirRange) width() float64 {
+	return r.hi - r.lo
+}
+
+// directionRange returns the smallest range which holds the directions of
+// the non-zero vectors in vs, or a range of half a turn or more where no
+// range shorter than half a turn holds them.  A range shorter than half a
+// turn holds the direction of every non-zero combination of the vectors
+// with non-negative weights.
+func directionRange(vs [3]vec.Vec2) dirRange {
+	ref, lo, hi := relativeAngles(vs)
+	return dirRange{base: math.Atan2(ref.Y, ref.X), lo: lo, hi: hi}
+}
+
+// relativeAngles returns the first non-zero vector ref in vs, together with
+// the smallest and largest signed angle from ref to a non-zero vector in
+// vs.  These are the offsets of the range found by [directionRange],
+// relative to the direction of ref.
+func relativeAngles(vs [3]vec.Vec2) (ref vec.Vec2, lo, hi float64) {
+	for _, d := range vs {
 		if d == (vec.Vec2{}) {
 			continue
 		}
-		if prev != (vec.Vec2{}) {
-			total += math.Atan2(math.Abs(prev.Cross(d)), prev.Dot(d))
+		if ref == (vec.Vec2{}) {
+			ref = d
+			continue
 		}
-		prev = d
+		// Relative to a vector in the range, the other vectors lie within
+		// half a turn either side, and the signed angles are their
+		// positions in the range.  Where the vectors fit into no range
+		// shorter than half a turn, the signed angles span half a turn or
+		// more as well.
+		a := math.Atan2(ref.Cross(d), ref.Dot(d))
+		lo, hi = min(lo, a), max(hi, a)
 	}
-	return total
+	return ref, lo, hi
 }
 
 // strokeBounds accumulates the bounding box of the pieces a stroke is made
@@ -366,13 +427,15 @@ func (b *strokeBounds) segment(s strokeSeg) {
 
 	// Every point of the ideal stroke lies within half the line width of
 	// the curve.  A renderer which flattens the curve joins the pieces with
-	// the path's join style, and a miter there reaches no further than
-	// [strokeBounds.miterReach] for the curve's turning.  A square dash cap,
-	// which can sit anywhere along the curve, reaches out by the square root
-	// of two times half the line width.
+	// the path's join style, and since the two chords at a join both point
+	// within the range of directions of the curve's chords, the miter there
+	// reaches no further than [strokeBounds.miterReach] for the width of
+	// that range.  A square dash cap, which can sit anywhere along the
+	// curve, reaches out by the square root of two times half the line
+	// width.
 	reach := b.half
 	if b.opt.Join == JoinMiter {
-		reach = b.miterReach(s.turn)
+		reach = b.miterReach(s.spread)
 	}
 	if b.opt.Dashed && b.opt.Cap == CapSquare {
 		reach = max(reach, b.half*math.Sqrt2)
@@ -391,14 +454,38 @@ func (b *strokeBounds) joinSegs(s, next strokeSeg) {
 	}
 
 	// A renderer which flattens a curve joins the chords next to the
-	// vertex, and a chord points away from the tangent by at most the
-	// curve's turning.  A round or bevel join stays within half the line
-	// width of the vertex, where the curve's own box already reaches.
+	// vertex, and each chord points within the range of directions of the
+	// chords of its segment which end or start at the vertex.  A round or
+	// bevel join stays within half the line width of the vertex, where the
+	// curve's own box already reaches.
 	if b.opt.Join == JoinMiter {
-		in, out := s.endDir(), next.startDir()
-		alpha := math.Atan2(math.Abs(in.Cross(out)), in.Dot(out))
-		b.discRadius(q, b.miterReach(alpha+s.turn+next.turn))
+		b.discRadius(q, b.miterReach(maxTurn(s, next)))
 	}
+}
+
+// maxTurn returns the largest angle by which the direction can turn from a
+// chord of s which ends at the end point of s to a chord of next which
+// starts there, or half a turn where the ranges of directions give no bound
+// below this.
+func maxTurn(s, next strokeSeg) float64 {
+	in, out := s.end, next.start
+	if in.width() >= math.Pi || out.width() >= math.Pi {
+		return math.Pi
+	}
+
+	// The differences between a direction of out and one of in fill the
+	// interval [lo, hi], which is shorter than a full turn.  The angle
+	// between two directions grows with the distance of their difference
+	// from the nearest multiple of a full turn, and reaches half a turn at
+	// the odd multiples of half a turn.
+	d := out.base - in.base
+	lo, hi := d+(out.lo-in.hi), d+(out.hi-in.lo)
+	k := math.Ceil((lo - math.Pi) / (2 * math.Pi))
+	if math.Pi+2*math.Pi*k <= hi {
+		return math.Pi
+	}
+	return max(math.Abs(math.Remainder(lo, 2*math.Pi)),
+		math.Abs(math.Remainder(hi, 2*math.Pi)))
 }
 
 // capEnd adds the cap at the end point q of an open sub-path, where segment

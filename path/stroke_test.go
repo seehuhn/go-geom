@@ -6,6 +6,7 @@ package path
 import (
 	"math"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"seehuhn.de/go/geom/rect"
@@ -531,6 +532,86 @@ func TestStrokeBBoxCurveMiter(t *testing.T) {
 	checkBBox(t, got, true, want)
 }
 
+// TestStrokeBBoxMiterBendsAway checks that a curve which bends away from
+// the corner it meets gives a finite box without a miter limit, which
+// contains the stroke of every flattening of the curve.
+func TestStrokeBBoxMiterBendsAway(t *testing.T) {
+	// a quarter circle from (1, 0) to (0, 1), then a right turn upwards
+	const k = 0.5523
+	arc := Cubic{{X: 1, Y: 0}, {X: 1, Y: k}, {X: k, Y: 1}, {X: 0, Y: 1}}
+	end := vec.Vec2{X: 0, Y: 3}
+	p := (&Data{}).MoveTo(arc[0]).CubeTo(arc[1], arc[2], arc[3]).LineTo(end)
+	opt := StrokeOptions{Width: 0.1, Join: JoinMiter, MiterLimit: math.Inf(1)}
+
+	got, ok := p.Iter().StrokeBBox(opt)
+	if !ok {
+		t.Fatal("no bounding box")
+	}
+	if !got.IsFinite() {
+		t.Fatalf("bbox %v is infinite", got)
+	}
+	for pieces := 1; pieces <= 20; pieces++ {
+		poly := []vec.Vec2{arc[0]}
+		for i := 1; i <= pieces; i++ {
+			poly = append(poly, arc.At(float64(i)/float64(pieces)))
+		}
+		poly = append(poly, end)
+		want, _ := PolylineStrokeBBox([][]vec.Vec2{poly}, false, opt)
+		if !got.Grow(1e-9).Covers(want) {
+			t.Errorf("%d pieces: bbox %v does not cover %v", pieces, got, want)
+		}
+	}
+}
+
+// TestStrokeBBoxMiterCircle checks that a circle made of four quarter arcs
+// gives a finite box without a miter limit, which contains the stroke of
+// every flattening of the arcs.
+func TestStrokeBBoxMiterCircle(t *testing.T) {
+	const k = 0.5523
+	arcs := []Cubic{
+		{{X: 1, Y: 0}, {X: 1, Y: k}, {X: k, Y: 1}, {X: 0, Y: 1}},
+		{{X: 0, Y: 1}, {X: -k, Y: 1}, {X: -1, Y: k}, {X: -1, Y: 0}},
+		{{X: -1, Y: 0}, {X: -1, Y: -k}, {X: -k, Y: -1}, {X: 0, Y: -1}},
+		{{X: 0, Y: -1}, {X: k, Y: -1}, {X: 1, Y: -k}, {X: 1, Y: 0}},
+	}
+	p := (&Data{}).MoveTo(arcs[0][0])
+	for _, c := range arcs {
+		p.CubeTo(c[1], c[2], c[3])
+	}
+	p.Close()
+	opt := StrokeOptions{Width: 0.1, Join: JoinMiter, MiterLimit: math.Inf(1)}
+
+	got, ok := p.Iter().StrokeBBox(opt)
+	if !ok {
+		t.Fatal("no bounding box")
+	}
+	if !got.IsFinite() {
+		t.Fatalf("bbox %v is infinite", got)
+	}
+
+	r := rand.New(rand.NewPCG(5, 6))
+	for trial := range 200 {
+		var poly []vec.Vec2
+		for _, c := range arcs {
+			pieces := 1 + r.IntN(10)
+			ts := make([]float64, pieces)
+			for i := range pieces - 1 {
+				ts[i] = r.Float64()
+			}
+			ts[pieces-1] = 1
+			slices.Sort(ts)
+			poly = append(poly, c[0])
+			for _, u := range ts[:pieces-1] {
+				poly = append(poly, c.At(u))
+			}
+		}
+		want, _ := PolylineStrokeBBox([][]vec.Vec2{poly}, true, opt)
+		if !got.Grow(1e-9).Covers(want) {
+			t.Fatalf("trial %d: bbox %v does not cover %v", trial, got, want)
+		}
+	}
+}
+
 // TestStrokeBBoxDegenerateCurve checks curves which run straight because
 // their control points sit on the end points.
 func TestStrokeBBoxDegenerateCurve(t *testing.T) {
@@ -567,7 +648,7 @@ func TestStrokeBBoxSubpathStart(t *testing.T) {
 
 // TestStrokeBBoxFlattened checks that the box contains the stroke of the
 // path with each curve replaced by a polyline whose vertices lie on the
-// curve, for random paths and stroke options.
+// curve, for random paths, vertices and stroke options.
 func TestStrokeBBoxFlattened(t *testing.T) {
 	r := rand.New(rand.NewPCG(1, 2))
 	point := func() vec.Vec2 {
@@ -589,8 +670,14 @@ func TestStrokeBBoxFlattened(t *testing.T) {
 			}
 			c := Cubic{cur, point(), point(), point()}
 			p.CubeTo(c[1], c[2], c[3])
-			for k := 1; k <= pieces; k++ {
-				poly = append(poly, c.At(float64(k)/float64(pieces)))
+			ts := make([]float64, pieces)
+			for k := range pieces - 1 {
+				ts[k] = r.Float64()
+			}
+			ts[pieces-1] = 1
+			slices.Sort(ts)
+			for _, u := range ts {
+				poly = append(poly, c.At(u))
 			}
 			cur = c[3]
 		}
@@ -604,6 +691,9 @@ func TestStrokeBBoxFlattened(t *testing.T) {
 			Join:       JoinStyle(r.IntN(3)),
 			MiterLimit: 1 + 20*r.Float64(),
 			Dashed:     r.IntN(2) == 0,
+		}
+		if r.IntN(3) == 0 {
+			opt.MiterLimit = 1e4
 		}
 		got, ok := p.Iter().StrokeBBox(opt)
 		want, _ := PolylineStrokeBBox([][]vec.Vec2{poly}, closed, opt)

@@ -35,6 +35,29 @@ func TestIsZero(t *testing.T) {
 	}
 }
 
+func TestIsFinite(t *testing.T) {
+	inf, nan := math.Inf(1), math.NaN()
+	tests := []struct {
+		name string
+		r    Rect
+		want bool
+	}{
+		{"zero rect", Rect{}, true},
+		{"finite rect", Rect{-1, -2, 3, 4}, true},
+		{"infinite plane", Rect{-inf, -inf, inf, inf}, false},
+		{"one infinite side", Rect{0, 0, inf, 1}, false},
+		{"one NaN coordinate", Rect{0, nan, 1, 1}, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.r.IsFinite(); got != tt.want {
+				t.Errorf("IsFinite() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestDxDy(t *testing.T) {
 	tests := []struct {
 		name string
