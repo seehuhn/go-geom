@@ -244,3 +244,10 @@ func MiterLength(in, out vec.Vec2, lineWidth, miterLimit float64) (float64, bool
 	}
 	return lineWidth / 2 / sinHalf, true
 }
+
+// MaxMiterLength returns how far the join at any corner can reach from the
+// corner, for a stroke of the given width and miter limit.  This is the
+// longest length [MiterLength] returns for these, up to rounding.
+func MaxMiterLength(lineWidth, miterLimit float64) float64 {
+	return lineWidth / 2 * max(1, miterLimit*(1+miterTol))
+}

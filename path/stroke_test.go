@@ -5,6 +5,7 @@ package path
 
 import (
 	"math"
+	"math/rand/v2"
 	"testing"
 
 	"seehuhn.de/go/geom/rect"
@@ -409,47 +410,6 @@ func TestPolylineStrokeBBoxRepeatedVertex(t *testing.T) {
 	checkBBox(t, got, true, rect.Rect{LLx: -r, LLy: -r, URx: 10 + r, URy: 10 + r})
 }
 
-// TestDistinctVertices checks the collapsing of coincident vertices on its
-// own, including that an input with nothing to collapse is handed back as
-// it is.
-func TestDistinctVertices(t *testing.T) {
-	a, b, c := vec.Vec2{X: 0, Y: 0}, vec.Vec2{X: 1, Y: 0}, vec.Vec2{X: 1, Y: 1}
-	for _, tc := range []struct {
-		in     []vec.Vec2
-		closed bool
-		want   []vec.Vec2
-	}{
-		{nil, false, nil},
-		{[]vec.Vec2{}, true, []vec.Vec2{}},
-		{[]vec.Vec2{a}, true, []vec.Vec2{a}},
-		{[]vec.Vec2{a, a}, false, []vec.Vec2{a}},
-		{[]vec.Vec2{a, a}, true, []vec.Vec2{a}},
-		{[]vec.Vec2{a, b, c}, true, []vec.Vec2{a, b, c}},
-		{[]vec.Vec2{a, a, b, b, c, c}, false, []vec.Vec2{a, b, c}},
-		{[]vec.Vec2{a, b, c, a}, false, []vec.Vec2{a, b, c, a}},
-		{[]vec.Vec2{a, b, c, a}, true, []vec.Vec2{a, b, c}},
-		{[]vec.Vec2{a, b, c, c, a, a}, true, []vec.Vec2{a, b, c}},
-		{[]vec.Vec2{a, b, a}, true, []vec.Vec2{a, b}},
-	} {
-		got := distinctVertices(tc.in, tc.closed)
-		if len(got) != len(tc.want) {
-			t.Errorf("distinctVertices(%v, %v) = %v, want %v", tc.in, tc.closed, got, tc.want)
-			continue
-		}
-		for i := range got {
-			if got[i] != tc.want[i] {
-				t.Errorf("distinctVertices(%v, %v) = %v, want %v", tc.in, tc.closed, got, tc.want)
-				break
-			}
-		}
-	}
-
-	clean := []vec.Vec2{a, b, c}
-	if got := distinctVertices(clean, false); len(got) != 3 || &got[0] != &clean[0] {
-		t.Error("a sub-path with nothing to collapse was copied")
-	}
-}
-
 // TestPolylineStrokeBBoxSubpaths checks that every sub-path is taken in.
 func TestPolylineStrokeBBoxSubpaths(t *testing.T) {
 	got, ok := PolylineStrokeBBox([][]vec.Vec2{
@@ -478,6 +438,180 @@ func TestJoinStyleString(t *testing.T) {
 	}{{JoinMiter, "miter"}, {JoinRound, "round"}, {JoinBevel, "bevel"}} {
 		if got := tc.style.String(); got != tc.want {
 			t.Errorf("JoinStyle(%d) = %q, want %q", tc.style, got, tc.want)
+		}
+	}
+}
+
+// TestStrokeBBoxPolyline checks that a path of straight segments gets the
+// same box as the polylines through its vertices.
+func TestStrokeBBoxPolyline(t *testing.T) {
+	pts := []vec.Vec2{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 10, Y: 10}, {X: 10, Y: 10}, {X: 3, Y: 4}}
+	for _, closed := range []bool{false, true} {
+		for _, join := range []JoinStyle{JoinMiter, JoinRound, JoinBevel} {
+			for _, lineCap := range []CapStyle{CapButt, CapRound, CapSquare} {
+				opt := StrokeOptions{Width: 3, Cap: lineCap, Join: join}
+				p := &Data{}
+				p.MoveTo(pts[0])
+				for _, q := range pts[1:] {
+					p.LineTo(q)
+				}
+				if closed {
+					p.Close()
+				}
+				want, _ := PolylineStrokeBBox([][]vec.Vec2{pts}, closed, opt)
+				got, ok := p.Iter().StrokeBBox(opt)
+				if !ok || !nearlyEqual(got, want, 1e-9) {
+					t.Errorf("closed=%v %v %v: bbox %v, want %v", closed, join, lineCap, got, want)
+				}
+			}
+		}
+	}
+}
+
+// TestStrokeBBoxRoundCurve checks that with round caps and joins a curve's
+// box is its tight box grown by half the line width.
+func TestStrokeBBoxRoundCurve(t *testing.T) {
+	c := Cubic{{X: 0, Y: 0}, {X: 0, Y: 10}, {X: 10, Y: 10}, {X: 10, Y: 0}}
+	p := (&Data{}).MoveTo(c[0]).CubeTo(c[1], c[2], c[3])
+	got, ok := p.Iter().StrokeBBox(StrokeOptions{Width: 2, Cap: CapRound, Join: JoinRound})
+	checkBBox(t, got, ok, c.BBox().Grow(1))
+}
+
+// TestStrokeBBoxZeroLength checks sub-paths which draw no segment of
+// non-zero length.
+func TestStrokeBBoxZeroLength(t *testing.T) {
+	pt := vec.Vec2{X: 5, Y: 5}
+	round := StrokeOptions{Width: 2, Cap: CapRound}
+	butt := StrokeOptions{Width: 2, Cap: CapButt}
+
+	// a lone move draws nothing
+	lone := (&Data{}).MoveTo(pt).MoveTo(vec.Vec2{X: 50, Y: 50}).LineTo(vec.Vec2{X: 50, Y: 50})
+	got, ok := lone.Iter().StrokeBBox(round)
+	checkBBox(t, got, ok, rect.Rect{LLx: 49, LLy: 49, URx: 51, URy: 51})
+
+	// a closed single point is a zero-length line
+	closed := (&Data{}).MoveTo(pt).Close()
+	got, ok = closed.Iter().StrokeBBox(round)
+	checkBBox(t, got, ok, rect.Rect{LLx: 4, LLy: 4, URx: 6, URy: 6})
+	if _, ok := closed.Iter().StrokeBBox(butt); ok {
+		t.Error("zero-length line with butt caps has a bounding box")
+	}
+
+	// a curve whose points all coincide
+	curve := (&Data{}).MoveTo(pt).CubeTo(pt, pt, pt)
+	got, ok = curve.Iter().StrokeBBox(round)
+	checkBBox(t, got, ok, rect.Rect{LLx: 4, LLy: 4, URx: 6, URy: 6})
+}
+
+// TestStrokeBBoxCurveMiter checks that a miter join between a curve and a
+// line is taken in, and that with round caps and joins the box is exact.
+func TestStrokeBBoxCurveMiter(t *testing.T) {
+	// a straight curve along the x axis, then a sharp turn back
+	p := (&Data{}).MoveTo(vec.Vec2{X: 0, Y: 0}).
+		CubeTo(vec.Vec2{X: 3, Y: 0}, vec.Vec2{X: 6, Y: 0}, vec.Vec2{X: 10, Y: 0}).
+		LineTo(vec.Vec2{X: 0, Y: 2})
+	poly := [][]vec.Vec2{{{X: 0, Y: 0}, {X: 10, Y: 0}, {X: 0, Y: 2}}}
+	opt := StrokeOptions{Width: 2, Join: JoinMiter, MiterLimit: 20}
+	got, ok := p.Iter().StrokeBBox(opt)
+	if !ok {
+		t.Fatal("no bounding box")
+	}
+	miter, _ := PolylineStrokeBBox(poly, false, opt)
+	bevel, _ := PolylineStrokeBBox(poly, false, StrokeOptions{Width: 2, Join: JoinBevel})
+	if miter == bevel {
+		t.Fatal("the corner is bevelled, the test needs a sharper miter")
+	}
+	if !got.Covers(miter) {
+		t.Errorf("bbox %v does not cover the polyline box %v", got, miter)
+	}
+
+	opt.Join, opt.Cap = JoinRound, CapRound
+	got, _ = p.Iter().StrokeBBox(opt)
+	want, _ := PolylineStrokeBBox(poly, false, opt)
+	checkBBox(t, got, true, want)
+}
+
+// TestStrokeBBoxDegenerateCurve checks curves which run straight because
+// their control points sit on the end points.
+func TestStrokeBBoxDegenerateCurve(t *testing.T) {
+	a, b, c := vec.Vec2{X: 0, Y: 0}, vec.Vec2{X: 10, Y: 0}, vec.Vec2{X: 10, Y: 5}
+	p := (&Data{}).MoveTo(a).CubeTo(a, a, b).CubeTo(c, c, c)
+	opt := StrokeOptions{Width: 2, Cap: CapRound, Join: JoinRound}
+	got, ok := p.Iter().StrokeBBox(opt)
+	want, _ := PolylineStrokeBBox([][]vec.Vec2{{a, b, c}}, false, opt)
+	checkBBox(t, got, ok, want)
+
+	opt.Join, opt.MiterLimit = JoinMiter, 10
+	got, _ = p.Iter().StrokeBBox(opt)
+	want, _ = PolylineStrokeBBox([][]vec.Vec2{{a, b, c}}, false, opt)
+	if !got.Covers(want) {
+		t.Errorf("bbox %v does not cover the polyline box %v", got, want)
+	}
+}
+
+// TestStrokeBBoxSubpathStart checks where sub-paths start which do not
+// begin with a CmdMoveTo: at the origin for the first, and at the start of
+// the sub-path just closed after a CmdClose.
+func TestStrokeBBoxSubpathStart(t *testing.T) {
+	opt := StrokeOptions{Width: 2, Cap: CapButt, Join: JoinBevel}
+
+	p := (&Data{}).LineTo(vec.Vec2{X: 10, Y: 0})
+	got, ok := p.Iter().StrokeBBox(opt)
+	checkBBox(t, got, ok, rect.Rect{LLx: 0, LLy: -1, URx: 10, URy: 1})
+
+	p = (&Data{}).MoveTo(vec.Vec2{X: 20, Y: 0}).LineTo(vec.Vec2{X: 30, Y: 0}).Close().
+		LineTo(vec.Vec2{X: 20, Y: 10})
+	got, ok = p.Iter().StrokeBBox(opt)
+	checkBBox(t, got, ok, rect.Rect{LLx: 19, LLy: -1, URx: 30, URy: 10})
+}
+
+// TestStrokeBBoxFlattened checks that the box contains the stroke of the
+// path with each curve replaced by a polyline whose vertices lie on the
+// curve, for random paths and stroke options.
+func TestStrokeBBoxFlattened(t *testing.T) {
+	r := rand.New(rand.NewPCG(1, 2))
+	point := func() vec.Vec2 {
+		return vec.Vec2{X: r.Float64()*20 - 10, Y: r.Float64()*20 - 10}
+	}
+	for range 2000 {
+		closed := r.IntN(2) == 0
+		pieces := 1 + r.IntN(40)
+
+		cur := point()
+		p := (&Data{}).MoveTo(cur)
+		poly := []vec.Vec2{cur}
+		for range 1 + r.IntN(3) {
+			if r.IntN(2) == 0 {
+				cur = point()
+				p.LineTo(cur)
+				poly = append(poly, cur)
+				continue
+			}
+			c := Cubic{cur, point(), point(), point()}
+			p.CubeTo(c[1], c[2], c[3])
+			for k := 1; k <= pieces; k++ {
+				poly = append(poly, c.At(float64(k)/float64(pieces)))
+			}
+			cur = c[3]
+		}
+		if closed {
+			p.Close()
+		}
+
+		opt := StrokeOptions{
+			Width:      0.1 + 3*r.Float64(),
+			Cap:        CapStyle(r.IntN(3)),
+			Join:       JoinStyle(r.IntN(3)),
+			MiterLimit: 1 + 20*r.Float64(),
+			Dashed:     r.IntN(2) == 0,
+		}
+		got, ok := p.Iter().StrokeBBox(opt)
+		want, _ := PolylineStrokeBBox([][]vec.Vec2{poly}, closed, opt)
+		const tol = 1e-9
+		grown := got.Grow(tol)
+		if !ok || !grown.Covers(want) {
+			t.Fatalf("closed=%v %+v, %d pieces: bbox %v does not cover %v",
+				closed, opt, pieces, got, want)
 		}
 	}
 }

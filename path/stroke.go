@@ -5,6 +5,7 @@ package path
 
 import (
 	"fmt"
+	"math"
 
 	"seehuhn.de/go/geom/linalg"
 	"seehuhn.de/go/geom/rect"
@@ -118,68 +119,287 @@ type StrokeOptions struct {
 // The second result is false where the stroke draws nothing, in which case
 // there is nothing to bound.
 func PolylineStrokeBBox(subpaths [][]vec.Vec2, closed bool, opt StrokeOptions) (rect.Rect, bool) {
-	if opt.MiterLimit == 0 {
-		opt.MiterLimit = DefaultMiterLimit
-	}
-
-	b := &strokeBounds{half: opt.Width / 2}
+	b := newStrokeBounds(opt)
+	var segs []strokeSeg
 	for _, pts := range subpaths {
-		pts = distinctVertices(pts, closed)
-		n := len(pts)
-		if n == 0 {
+		if len(pts) == 0 {
 			continue
 		}
-		if n == 1 {
-			if opt.Cap == CapRound {
-				b.disc(pts[0])
-			}
-			continue
+		segs = segs[:0]
+		for i := 1; i < len(pts); i++ {
+			segs = append(segs, lineSeg(pts[i-1], pts[i]))
 		}
-
-		// The stroke is the union of one rectangle per segment, a join at
-		// each corner and a cap at each end.  Where two segments meet, the
-		// rectangles' corners already hold a bevel join, and at an open end
-		// they hold a butt cap.  A dash has its own caps, which along a
-		// segment stay within the segment's rectangle and reach furthest out
-		// where the dash ends or starts on one of its end points.
-		numSeg := n - 1
 		if closed {
-			numSeg = n
+			segs = append(segs, lineSeg(pts[len(pts)-1], pts[0]))
 		}
-		for i := range numSeg {
-			p, q := pts[i], pts[(i+1)%n]
-			side := q.Sub(p).Rot90().Normalize().Mul(b.half)
-			b.add(p.Add(side))
-			b.add(p.Sub(side))
-			b.add(q.Add(side))
-			b.add(q.Sub(side))
-			if opt.Dashed {
-				b.cap(p, p.Sub(q), opt.Cap)
-				b.cap(q, q.Sub(p), opt.Cap)
-			}
-		}
-
-		first, last := 1, n-1
-		if closed {
-			first, last = 0, n
-		}
-		for i := first; i < last; i++ {
-			b.join(pts[(i+n-1)%n], pts[i], pts[(i+1)%n], opt)
-		}
-		if !closed {
-			b.cap(pts[0], pts[0].Sub(pts[1]), opt.Cap)
-			b.cap(pts[n-1], pts[n-1].Sub(pts[n-2]), opt.Cap)
-		}
+		b.subpath(pts[0], segs, closed)
 	}
 	return b.bbox, b.seeded
+}
+
+// StrokeBBox returns an axis-aligned rectangle which contains the stroke
+// drawn along the path.  A sub-path ended by a [CmdClose] is closed: it has
+// a join at every vertex and no ends to cap.  The other sub-paths are open.
+//
+// Where the path has no curve segments, the rectangle is the smallest one
+// containing the stroke, as for [PolylineStrokeBBox].  Where it has curves,
+// the rectangle contains both the ideal stroke and the stroke a renderer
+// draws by replacing each curve with a polyline whose vertices lie on the
+// curve, joining the pieces with the path's join style and pointing caps
+// along the end pieces.  With round caps and joins it is the smallest
+// rectangle containing the ideal stroke; otherwise it can be larger.  Both
+// hold up to rounding: where a curve's stroke touches the rectangle, it can
+// reach beyond it by a few units in the last place.
+//
+// A sub-path all of whose points coincide, including one which consists of
+// a [CmdMoveTo] and a [CmdClose], is a zero-length line.  With round caps it
+// is drawn as a disc of the line width.  With butt or square caps it draws
+// nothing.  A CmdMoveTo which starts no segment draws nothing either.
+//
+// With opt.Dashed set, the rectangle contains the stroke for every dash
+// pattern and phase.
+//
+// The second result is false where the stroke draws nothing, in which case
+// there is nothing to bound.
+func (p Path) StrokeBBox(opt StrokeOptions) (rect.Rect, bool) {
+	b := newStrokeBounds(opt)
+
+	var segs []strokeSeg
+	var start, cur vec.Vec2
+	started := false // a sub-path has begun
+	finish := func(closed bool) {
+		if len(segs) > 0 {
+			b.subpath(start, segs, closed)
+		}
+		segs = segs[:0]
+		started = false
+	}
+	for cmd, pts := range p.ToCubic() {
+		switch cmd {
+		case CmdMoveTo:
+			finish(false)
+			start, cur = pts[0], pts[0]
+			started = true
+		case CmdLineTo, CmdCubeTo:
+			if !started {
+				start = cur
+				started = true
+			}
+			if cmd == CmdLineTo {
+				segs = append(segs, lineSeg(cur, pts[0]))
+			} else {
+				segs = append(segs, curveSeg(Cubic{cur, pts[0], pts[1], pts[2]}))
+			}
+			cur = pts[len(pts)-1]
+		case CmdClose:
+			if started {
+				segs = append(segs, lineSeg(cur, start))
+				finish(true)
+				cur = start
+			}
+		}
+	}
+	finish(false)
+	return b.bbox, b.seeded
+}
+
+// strokeSeg is one segment of a stroked sub-path: a cubic Bezier curve, or
+// a straight line from c[0] to c[3], with c[1] = c[0] and c[2] = c[3].
+type strokeSeg struct {
+	c     Cubic
+	curve bool
+	turn  float64 // the curve's turning, as given by [controlTurning]
+}
+
+func lineSeg(p, q vec.Vec2) strokeSeg {
+	return strokeSeg{c: Cubic{p, p, q, q}}
+}
+
+func curveSeg(c Cubic) strokeSeg {
+	return strokeSeg{c: c, curve: true, turn: controlTurning(c)}
+}
+
+// startDir returns the direction in which the segment leaves its start
+// point.  It is zero for a segment of length zero.
+func (s strokeSeg) startDir() vec.Vec2 {
+	for _, p := range s.c[1:3] {
+		if d := p.Sub(s.c[0]); d != (vec.Vec2{}) {
+			return d
+		}
+	}
+	return s.c[3].Sub(s.c[0])
+}
+
+// endDir returns the direction in which the segment arrives at its end
+// point.  It is zero for a segment of length zero.
+func (s strokeSeg) endDir() vec.Vec2 {
+	for i := 2; i > 0; i-- {
+		if d := s.c[3].Sub(s.c[i]); d != (vec.Vec2{}) {
+			return d
+		}
+	}
+	return s.c[3].Sub(s.c[0])
+}
+
+// controlTurning returns the total angle by which the control polygon of c
+// turns.  This bounds the turning of the curve, and of every polyline
+// inscribed in it.
+func controlTurning(c Cubic) float64 {
+	var total float64
+	var prev vec.Vec2
+	for i := 1; i < 4; i++ {
+		d := c[i].Sub(c[i-1])
+		if d == (vec.Vec2{}) {
+			continue
+		}
+		if prev != (vec.Vec2{}) {
+			total += math.Atan2(math.Abs(prev.Cross(d)), prev.Dot(d))
+		}
+		prev = d
+	}
+	return total
 }
 
 // strokeBounds accumulates the bounding box of the pieces a stroke is made
 // of.
 type strokeBounds struct {
-	half   float64 // half the line width
-	bbox   rect.Rect
-	seeded bool
+	opt      StrokeOptions
+	half     float64 // half the line width
+	maxMiter float64 // the furthest a join can reach from its vertex
+	bbox     rect.Rect
+	seeded   bool
+}
+
+func newStrokeBounds(opt StrokeOptions) *strokeBounds {
+	if opt.MiterLimit == 0 {
+		opt.MiterLimit = DefaultMiterLimit
+	}
+	return &strokeBounds{
+		opt:      opt,
+		half:     opt.Width / 2,
+		maxMiter: linalg.MaxMiterLength(opt.Width, opt.MiterLimit),
+	}
+}
+
+// subpath adds the stroke of the sub-path which starts at start and
+// consists of segs, each starting where the one before it ends.  For a
+// closed sub-path, the last segment ends at start.  The function overwrites
+// segs.
+//
+// The stroke is the union of one piece per segment, a join at each corner
+// and a cap at each end.
+func (b *strokeBounds) subpath(start vec.Vec2, segs []strokeSeg, closed bool) {
+	// A zero-length segment adds nothing to the stroke, and a stroker joins
+	// the segments on either side of it as though it were not there.
+	k := 0
+	for _, s := range segs {
+		if s.startDir() != (vec.Vec2{}) {
+			segs[k] = s
+			k++
+		}
+	}
+	segs = segs[:k]
+	n := len(segs)
+	if n == 0 {
+		if b.opt.Cap == CapRound {
+			b.disc(start)
+		}
+		return
+	}
+
+	for _, s := range segs {
+		b.segment(s)
+	}
+	for i := range n - 1 {
+		b.joinSegs(segs[i], segs[i+1])
+	}
+	if closed {
+		b.joinSegs(segs[n-1], segs[0])
+	} else {
+		b.capEnd(segs[0].c[0], segs[0].startDir().Neg(), segs[0])
+		b.capEnd(segs[n-1].c[3], segs[n-1].endDir(), segs[n-1])
+	}
+}
+
+// segment adds the stroke along one segment of non-zero length, without the
+// joins and caps at its ends.
+//
+// For a straight segment the piece is a rectangle.  Where two segments
+// meet, the rectangles' corners already hold a bevel join, and at an open
+// end they hold a butt cap.  A dash has its own caps, which along a
+// straight segment stay within the segment's rectangle and reach furthest
+// out where the dash ends or starts on one of its end points.
+func (b *strokeBounds) segment(s strokeSeg) {
+	if !s.curve {
+		p, q := s.c[0], s.c[3]
+		side := q.Sub(p).Rot90().Normalize().Mul(b.half)
+		b.add(p.Add(side))
+		b.add(p.Sub(side))
+		b.add(q.Add(side))
+		b.add(q.Sub(side))
+		if b.opt.Dashed {
+			b.cap(p, p.Sub(q))
+			b.cap(q, q.Sub(p))
+		}
+		return
+	}
+
+	// Every point of the ideal stroke lies within half the line width of
+	// the curve.  A renderer which flattens the curve joins the pieces with
+	// the path's join style, and a miter there reaches no further than
+	// [strokeBounds.miterReach] for the curve's turning.  A square dash cap,
+	// which can sit anywhere along the curve, reaches out by the square root
+	// of two times half the line width.
+	reach := b.half
+	if b.opt.Join == JoinMiter {
+		reach = b.miterReach(s.turn)
+	}
+	if b.opt.Dashed && b.opt.Cap == CapSquare {
+		reach = max(reach, b.half*math.Sqrt2)
+	}
+	r := s.c.BBox().Grow(reach)
+	b.add(vec.Vec2{X: r.LLx, Y: r.LLy})
+	b.add(vec.Vec2{X: r.URx, Y: r.URy})
+}
+
+// joinSegs adds the join where segment s ends and segment next starts.
+func (b *strokeBounds) joinSegs(s, next strokeSeg) {
+	q := s.c[3]
+	if !s.curve && !next.curve {
+		b.join(s.c[0], q, next.c[3])
+		return
+	}
+
+	// A renderer which flattens a curve joins the chords next to the
+	// vertex, and a chord points away from the tangent by at most the
+	// curve's turning.  A round or bevel join stays within half the line
+	// width of the vertex, where the curve's own box already reaches.
+	if b.opt.Join == JoinMiter {
+		in, out := s.endDir(), next.startDir()
+		alpha := math.Atan2(math.Abs(in.Cross(out)), in.Dot(out))
+		b.discRadius(q, b.miterReach(alpha+s.turn+next.turn))
+	}
+}
+
+// capEnd adds the cap at the end point q of an open sub-path, where segment
+// s arrives at q from direction away.
+func (b *strokeBounds) capEnd(q, away vec.Vec2, s strokeSeg) {
+	if s.curve && b.opt.Cap == CapSquare {
+		// a renderer which flattens the curve points the cap along the
+		// last chord, not the tangent
+		b.discRadius(q, b.half*math.Sqrt2)
+		return
+	}
+	b.cap(q, away)
+}
+
+// miterReach returns how far a join can reach from its vertex where the
+// path turns by at most theta there.
+func (b *strokeBounds) miterReach(theta float64) float64 {
+	if theta >= math.Pi {
+		return b.maxMiter
+	}
+	return min(b.maxMiter, b.half/math.Cos(theta/2))
 }
 
 func (b *strokeBounds) add(p vec.Vec2) {
@@ -197,8 +417,13 @@ var axes = [4]vec.Vec2{{X: 1}, {X: -1}, {Y: 1}, {Y: -1}}
 
 // disc adds the disc of half the line width around centre.
 func (b *strokeBounds) disc(centre vec.Vec2) {
+	b.discRadius(centre, b.half)
+}
+
+// discRadius adds the disc of radius r around centre.
+func (b *strokeBounds) discRadius(centre vec.Vec2, r float64) {
 	for _, e := range axes {
-		b.add(centre.Add(e.Mul(b.half)))
+		b.add(centre.Add(e.Mul(r)))
 	}
 }
 
@@ -216,10 +441,10 @@ func (b *strokeBounds) arc(centre, mid vec.Vec2, cosHalfAngle float64) {
 
 // join adds the join at q of a stroke running from p to q to r, beyond the
 // corners of the two segments' rectangles.
-func (b *strokeBounds) join(p, q, r vec.Vec2, opt StrokeOptions) {
-	switch opt.Join {
+func (b *strokeBounds) join(p, q, r vec.Vec2) {
+	switch b.opt.Join {
 	case JoinMiter:
-		if tip, ok := miterTip(p, q, r, opt); ok {
+		if tip, ok := miterTip(p, q, r, b.opt); ok {
 			b.add(tip)
 		}
 	case JoinRound:
@@ -238,9 +463,9 @@ func (b *strokeBounds) join(p, q, r vec.Vec2, opt StrokeOptions) {
 
 // cap adds the cap at the end point q of an open sub-path, pointing in
 // direction away, beyond the corners of the end segment's rectangle.
-func (b *strokeBounds) cap(q, away vec.Vec2, style CapStyle) {
+func (b *strokeBounds) cap(q, away vec.Vec2) {
 	d := away.Normalize()
-	switch style {
+	switch b.opt.Cap {
 	case CapSquare:
 		ext, side := d.Mul(b.half), d.Rot90().Mul(b.half)
 		b.add(q.Add(ext).Add(side))
@@ -270,41 +495,4 @@ func miterTip(a, b, c vec.Vec2, opt StrokeOptions) (vec.Vec2, bool) {
 		return vec.Vec2{}, false
 	}
 	return b.Add(u.Normalize().Mul(length)), true
-}
-
-// distinctVertices returns the vertices of a sub-path with each run of
-// coincident consecutive vertices collapsed to one.  For a closed sub-path
-// a last vertex which coincides with the first is dropped as well, since
-// the closing segment already returns there.
-//
-// A zero-length segment adds nothing to the stroke, and a stroker joins the
-// segments on either side of it as though it were not there.  The join at
-// such a vertex therefore has to be computed from the nearest distinct
-// neighbours, which this makes the adjacent ones.  The result shares the
-// input's storage where there is nothing to collapse.
-func distinctVertices(pts []vec.Vec2, closed bool) []vec.Vec2 {
-	n := len(pts)
-	if closed && n > 1 && pts[n-1] == pts[0] {
-		n--
-	}
-	// k is the index of the first repeated vertex
-	k := 1
-	for k < n && pts[k] != pts[k-1] {
-		k++
-	}
-	if k >= n {
-		return pts[:n]
-	}
-
-	out := make([]vec.Vec2, k, n)
-	copy(out, pts)
-	for _, p := range pts[k:n] {
-		if p != out[len(out)-1] {
-			out = append(out, p)
-		}
-	}
-	if closed && len(out) > 1 && out[len(out)-1] == out[0] {
-		out = out[:len(out)-1]
-	}
-	return out
 }

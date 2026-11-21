@@ -866,3 +866,26 @@ func TestMiterLengthSymmetry(t *testing.T) {
 		t.Errorf("lengths differ: %g vs %g", a, b)
 	}
 }
+
+// TestMaxMiterLength checks that no corner reaches further than
+// MaxMiterLength, and that a corner on the limit reaches that far.
+func TestMaxMiterLength(t *testing.T) {
+	const lineWidth = 2
+	rng := rand.New(rand.NewSource(1))
+	for _, limit := range []float64{0.5, 1, math.Sqrt2, 4, 10} {
+		longest := MaxMiterLength(lineWidth, limit)
+		for range 1000 {
+			in := vec.Vec2{X: rng.NormFloat64(), Y: rng.NormFloat64()}
+			out := vec.Vec2{X: rng.NormFloat64(), Y: rng.NormFloat64()}
+			if got, _ := MiterLength(in, out, lineWidth, limit); got > longest*(1+1e-15) {
+				t.Fatalf("limit %g: corner %v, %v reaches %g, beyond %g", limit, in, out, got, longest)
+			}
+		}
+	}
+
+	// a right angle has a miter ratio of exactly sqrt(2)
+	got, ok := MiterLength(vec.Vec2{X: 1}, vec.Vec2{Y: 1}, lineWidth, math.Sqrt2)
+	if longest := MaxMiterLength(lineWidth, math.Sqrt2); !ok || math.Abs(got-longest) > 1e-9 {
+		t.Errorf("corner on the limit reaches %g, want %g", got, longest)
+	}
+}
