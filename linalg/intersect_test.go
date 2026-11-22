@@ -800,6 +800,29 @@ func TestMiterLengthAtLimit(t *testing.T) {
 	}
 }
 
+// TestMiterLengthReversal checks that a corner which doubles back exactly is
+// bevelled under any miter limit, whatever its direction and whatever the
+// lengths of its two segments.  The unit directions of such a corner are
+// rounded, and the rounding error must not pass for a tiny angle.
+func TestMiterLengthReversal(t *testing.T) {
+	cases := []struct{ in, out vec.Vec2 }{
+		{vec.Vec2{X: 10, Y: 10}, vec.Vec2{X: -10, Y: -10}},
+		{vec.Vec2{X: 1, Y: 3}, vec.Vec2{X: -1, Y: -3}},
+		{vec.Vec2{X: 1, Y: 3}, vec.Vec2{X: -7, Y: -21}},
+		{vec.Vec2{X: 1, Y: 3}, vec.Vec2{X: -15, Y: -45}},
+		{vec.Vec2{X: -7, Y: 0.1}, vec.Vec2{X: 7, Y: -0.1}},
+		{vec.Vec2{X: 1e-200, Y: 3e-200}, vec.Vec2{X: -1e-200, Y: -3e-200}},
+		{vec.Vec2{X: 0x1p-660, Y: 0x3p-660}, vec.Vec2{X: -0x7p-660, Y: -0x15p-660}},
+		{vec.Vec2{X: 2e200, Y: -1e200}, vec.Vec2{X: -2e200, Y: 1e200}},
+		{vec.Vec2{X: 0x1p660, Y: -0x3p658}, vec.Vec2{X: -0x7p660, Y: 0x15p658}},
+	}
+	for _, c := range cases {
+		if l, ok := MiterLength(c.in, c.out, 5, math.Inf(1)); ok {
+			t.Errorf("reversal %v -> %v gives a miter of length %g", c.in, c.out, l)
+		}
+	}
+}
+
 // TestMiterLengthSharpCorner checks the length reported for corners which
 // nearly double back.  Taking the half angle from the cosine of the turn
 // leaves no significant digits there: the cosine is close to -1, and adding

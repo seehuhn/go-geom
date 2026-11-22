@@ -209,13 +209,14 @@ const miterTol = 1e-12
 // neither has to be a unit vector.
 //
 // ok is false where the join is bevelled instead: where either direction is
-// zero and the corner has no angle to speak of, and where the miter is longer
-// than miterLimit times the line width.  That limit is on the whole miter,
-// from the inner corner of the join across to its tip, which is twice the
-// length returned here.  The length returned when ok is false is half the line
-// width, which is how far a bevelled join reaches.  A corner whose miter is
-// within a rounding error of the limit counts as within it, and a miterLimit
-// below 1 is shorter than any miter and bevels every corner.
+// zero, where the corner doubles back, and where the miter is longer than
+// miterLimit times the line width.  A corner which doubles back has no finite
+// miter under any limit.  The limit is on the whole miter, from the inner
+// corner of the join across to its tip, which is twice the length returned
+// here.  The length returned when ok is false is half the line width, which is
+// how far a bevelled join reaches.  A corner whose miter is within a rounding
+// error of the limit counts as within it, and a miterLimit below 1 is shorter
+// than any miter and bevels every corner.
 func MiterLength(in, out vec.Vec2, lineWidth, miterLimit float64) (float64, bool) {
 	// The directions are scaled to a common range first, so that their
 	// lengths neither overflow for a corner given in large coordinates nor
@@ -224,6 +225,14 @@ func MiterLength(in, out vec.Vec2, lineWidth, miterLimit float64) (float64, bool
 	v, _ := out.Frexp()
 	uLen, vLen := u.Length(), v.Length()
 	if uLen == 0 || vLen == 0 {
+		return lineWidth / 2, false
+	}
+
+	// A corner which doubles back has no miter.  This is tested exactly,
+	// since the unit directions below carry rounding errors which need not
+	// cancel, and what is left of their sum would pass for a tiny angle with
+	// an enormous miter.
+	if u.Cross(v) == 0 && u.Dot(v) < 0 {
 		return lineWidth / 2, false
 	}
 
@@ -237,7 +246,7 @@ func MiterLength(in, out vec.Vec2, lineWidth, miterLimit float64) (float64, bool
 	// there cos(theta) is close to -1, and adding one to it cancels away
 	// everything the cosine had.  The sum of the directions cancels as well,
 	// but component by component, and a subtraction of two nearby floats is
-	// exact.  A corner which doubles back leaves no sum and no miter at all.
+	// exact.
 	sinHalf := u.Mul(1/uLen).Add(v.Mul(1/vLen)).Length() / 2
 	if sinHalf <= 0 || 1/sinHalf > miterLimit*(1+miterTol) {
 		return lineWidth / 2, false
